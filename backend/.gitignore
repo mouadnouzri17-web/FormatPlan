@@ -1,0 +1,15 @@
+# Dépendances Node (fichier très lourd généré automatiquement)
+node_modules/
+
+# Fichiers d'environnement (contient vos mots de passe et liens secrets !)
+.env
+.env.local
+
+# Fichiers de log (erreurs)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Fichiers système (Mac/Windows)
+.DS_Store
+Thumbs.db
