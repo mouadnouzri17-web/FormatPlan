@@ -258,7 +258,7 @@ const ExportBase = mongoose.model("ExportBase", ExportBaseSchema);
 const app = express();
 
 app.use(cors({
-  origin: "*",
+  origin: ['http://localhost:5173', 'https://sparkling-empathy-production-05b3.up.railway.app'],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));

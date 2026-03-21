@@ -4,7 +4,7 @@ import { FileText, BarChart2, User, Receipt, Presentation, File } from "lucide-r
 /* ═══════════════════════════════════════════════════════════
    API CONFIG
 ══════════════════════════════════════════════════════════ */
-export const API_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL) || "http://localhost:5000/api";
+export const API_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL) || "https://sparkling-empathy-production-05b3.up.railway.app/api";
 
 export function norm(o) {
   if (!o) return o;

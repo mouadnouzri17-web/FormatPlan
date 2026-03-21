@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 
 const AUTH_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL)
   ? `${import_meta_env.VITE_API_URL}/auth`
-  : "http://localhost:5000/api/auth";
+  : "https://sparkling-empathy-production-05b3.up.railway.app/api/auth";
 const TOKEN_KEY = "gantt_auth_token";
 const USER_KEY  = "gantt_auth_user";
 
