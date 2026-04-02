@@ -168,7 +168,7 @@ const generateAttendancePDF = (doc, allCandidates) => {
 };
 
 const API_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL)
-  || "https://sparkling-empathy-production-05b3.up.railway.app/api";
+  || "https://formatplan-production.up.railway.app/api";
 
 function norm(o) {
   if (!o) return o;

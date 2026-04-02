@@ -24,7 +24,8 @@ app.use(cors({
     'http://localhost:5175', 
     'https://gantt-pied.vercel.app', 
     'https://m2s-formaplan.vercel.app',
-    'https://sparkling-empathy-production-05b3.up.railway.app'
+    'https://sparkling-empathy-production-05b3.up.railway.app',
+    'https://formatplan-production.up.railway.app'
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
