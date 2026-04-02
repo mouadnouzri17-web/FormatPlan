@@ -24,6 +24,7 @@ app.use(cors({
     'http://localhost:5175', 
     'https://gantt-pied.vercel.app', 
     'https://m2s-formaplan.vercel.app',
+    'https://format-plan.vercel.app',
     'https://sparkling-empathy-production-05b3.up.railway.app',
     'https://formatplan-production.up.railway.app'
   ],
