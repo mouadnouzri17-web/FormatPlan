@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 
 const AUTH_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL)
   ? `${import_meta_env.VITE_API_URL}/auth`
-  : "https://formatplan-production.up.railway.app/api/auth";
+  : "http://localhost:5000/api/auth" || "https://formatplan-production.up.railway.app/api/auth";
 
   //https://sparkling-empathy-production-05b3.up.railway.app
   //http://localhost:5000
@@ -140,11 +140,26 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
+  // ── Login with Google ────────────────────────────────────────────────────────
+  const loginWithGoogle = useCallback(async (idToken) => {
+    const res = await fetch(`${AUTH_BASE}/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Erreur de connexion Google");
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    setCurrentUser(data.user);
+    return data.user;
+  }, []);
+
   // ── Token getter (pour apiFetch) ─────────────────────────────────────────────
   const getToken = useCallback(() => localStorage.getItem(TOKEN_KEY), []);
 
   return (
-    <AuthContext.Provider value={{ currentUser, authLoading, login, register: registerAcc, updateProfile, logout, changePassword, getToken }}>
+    <AuthContext.Provider value={{ currentUser, authLoading, login, register: registerAcc, updateProfile, logout, changePassword, getToken, loginWithGoogle }}>
       {children}
     </AuthContext.Provider>
   );

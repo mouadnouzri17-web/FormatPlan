@@ -1,6 +1,7 @@
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import GanttChart from "@/components/GanttChart";
 import LoginPage from "./pages/LoginPage";
+import { GoogleOAuthProvider } from '@react-oauth/google';
 
 function AppContent() {
   const { currentUser, authLoading } = useAuth();
@@ -34,9 +35,13 @@ function AppContent() {
 }
 
 export default function App() {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+  
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <GoogleOAuthProvider clientId={clientId}>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </GoogleOAuthProvider>
   );
 }

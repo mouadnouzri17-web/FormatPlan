@@ -12,6 +12,9 @@ const jwt      = require("jsonwebtoken");
 const multer  = require("multer");
 const path    = require("path");
 const fs      = require("fs");
+const { OAuth2Client } = require("google-auth-library");
+const nodemailer = require("nodemailer");
+const cron = require("node-cron");
 
 // 1. INITIALISATION DE L'APP (Indispensable au tout début)
 const app = express();
@@ -19,6 +22,7 @@ const app = express();
 // Configuration CORS - Ajout de ton URL Vercel correcte
 app.use(cors({
   origin: [
+    'tauri://localhost',
     'http://localhost:5173', 
     'http://localhost:5174', 
     'http://localhost:5175', 
@@ -221,10 +225,20 @@ const TaskSchema = new mongoose.Schema({
   end:          { type: String, default: "" },
   halfDay:      { type: Boolean, default: false },
   slot:         { type: String, default: null },
-  color:        { type: String, default: "" },
+  color:        { type: String, default: ""  },
 }, { timestamps: true });
-
 const Task = mongoose.model("Task", TaskSchema);
+
+// --- MODÈLE CONFIG NOTIFICATION M2S ---
+const M2SConfigSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  recipientEmail: { type: String, default: "" },
+  frequency: { type: String, default: "weekly_monday" }, // "daily", "weekly_monday", "monthly_1st"
+  period: { type: String, default: "next_2_weeks" }, // "this_week", "next_week", "next_2_weeks", "custom"
+  customDays: { type: Number, default: 7 },
+  lastRun: { type: Date, default: null }
+}, { timestamps: true });
+const M2SConfig = mongoose.model("M2SConfig", M2SConfigSchema);
 
 // ── Document ──────────────────────────────────────────────────
 const DocumentSchema = new mongoose.Schema({
@@ -438,6 +452,57 @@ app.post("/api/auth/login", async (req, res) => {
     );
     res.json({ token, user: { id: user._id, username: user.username, role: user.role, displayName: user.displayName, parentId: user.parentId, permissions: user.permissions } });
   } catch (err) { res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) return res.status(400).json({ error: "idToken manquant" });
+
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { email, name, picture, sub: googleId } = payload;
+
+    // On utilise l'email comme username
+    let user = await User.findOne({ username: email });
+
+    if (!user) {
+      // Création d'un nouvel utilisateur si non existant
+      user = await User.create({
+        username: email,
+        password: await bcrypt.hash(Math.random().toString(36), 10), // Mot de passe aléatoire
+        displayName: name || email.split("@")[0],
+        role: "user",
+      });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, username: user.username, role: user.role, parentId: user.parentId, permissions: user.permissions },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        role: user.role,
+        displayName: user.displayName,
+        parentId: user.parentId,
+        permissions: user.permissions,
+        picture: picture // Optionnel
+      }
+    });
+  } catch (err) {
+    console.error("Google Auth Error:", err);
+    res.status(401).json({ error: "Authentification Google échouée" });
+  }
 });
 
 app.get("/api/auth/me", authenticateToken, async (req, res) => {
@@ -939,6 +1004,307 @@ app.post("/api/workspaces/:wsId/cabinets/import", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+app.post("/api/workspaces/:wsId/notify-cabinet", async (req, res, next) => {
+  try {
+    const { cabinetEmail, period, tasks } = req.body;
+    
+    if (!cabinetEmail || !period || !tasks || !Array.isArray(tasks)) {
+      return res.status(400).json({ success: false, message: "Paramètres manquants (email, période ou liste de tâches)." });
+    }
+
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      return res.status(500).json({ success: false, message: "La configuration SMTP (EMAIL_USER, EMAIL_PASS) est absente du serveur." });
+    }
+
+    const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  tls: {
+    rejectUnauthorized: false  // ← ajouter cette ligne
+  }
+});
+
+    const tasksHtml = tasks.map(t => {
+      let grp = t.groupe || "";
+      if (!grp && t.name?.includes(" — Grp ")) grp = t.name.split(" — Grp ")[1];
+      return `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${t.client || "—"}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${t.group}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${grp || "1"}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${t.start}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${t.end}</td>
+        </tr>
+      `;
+    }).join("");
+
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+        <h2 style="color: #2c3e50;">Notification de Formations à Venir</h2>
+        <p>Bonjour,</p>
+        <p>Voici le récapitulatif des formations planifiées pour <strong>${period}</strong> :</p>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+          <thead>
+            <tr style="background-color: #f2f2f2;">
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Client/Entreprise</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Thème</th>
+              <th style="padding: 8px; border: 1px solid #ddd;">Groupe</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Début</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Fin</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tasksHtml}
+          </tbody>
+        </table>
+        <p style="margin-top: 20px;">Cordialement,<br>L'équipe PlanAdmin</p>
+      </div>
+    `;
+
+    const mailOptions = {
+      from: `"PlanAdmin" <${process.env.EMAIL_USER}>`,
+      to: cabinetEmail,
+      subject: `[PlanAdmin] Formations à venir - ${period}`,
+      html: htmlBody
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Email sent to cabinet: %s", info.messageId);
+
+    res.json({ success: true, message: "Email de notification envoyé au cabinet avec succès." });
+  } catch (e) {
+    console.error("Erreur envoi email cabinet:", e);
+    res.status(500).json({ success: false, message: "Erreur lors de l'envoi de l'email: " + e.message });
+  }
+});
+
+// --- ROUTES CONFIG NOTIFICATION M2S ---
+app.get("/api/notifications/m2s-config", async (req, res) => {
+  try {
+    let config = await M2SConfig.findOne();
+    if (!config) {
+      config = await M2SConfig.create({ 
+        enabled: false, 
+        recipientEmail: "", 
+        frequency: "weekly_monday", 
+        period: "next_2_weeks", 
+        customDays: 7 
+      });
+    } else {
+      // S'assurer que les champs period/customDays existent (migration à la volée)
+      let changed = false;
+      if (config.period === undefined || config.period === null) {
+        config.period = "next_2_weeks";
+        changed = true;
+      }
+      if (config.customDays === undefined || config.customDays === null) {
+        config.customDays = 7;
+        changed = true;
+      }
+      if (changed) await config.save();
+    }
+    res.json({ success: true, data: config });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post("/api/notifications/m2s-config", async (req, res) => {
+  try {
+    const { enabled, recipientEmail, frequency, period, customDays } = req.body;
+    let config = await M2SConfig.findOne();
+    if (!config) {
+      config = await M2SConfig.create({ enabled, recipientEmail, frequency, period, customDays });
+    } else {
+      config.enabled = enabled;
+      config.recipientEmail = recipientEmail;
+      config.frequency = frequency;
+      config.period = period || config.period;
+      config.customDays = customDays || config.customDays;
+      await config.save();
+    }
+    // Redémarrer le cron avec la nouvelle config
+    startM2SCron(config);
+    res.json({ success: true, data: config });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// --- LOGIQUE CRON M2S ---
+let m2sJob = null;
+
+async function sendAutoM2SEmail() {
+  try {
+    const config = await M2SConfig.findOne();
+    if (!config || !config.enabled || !config.recipientEmail) return;
+
+    console.log("[CRON] Démarrage de l'envoi automatique M2S...");
+
+    const workspaces = await Workspace.find();
+    let allTasks = [];
+
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    const todayStr = now.toISOString().split("T")[0];
+    
+    let startStr = todayStr;
+    let endStr = todayStr;
+
+    if (config.period === "this_week") {
+      const end = new Date(now);
+      end.setDate(now.getDate() + (7 - now.getDay()));
+      endStr = end.toISOString().split("T")[0];
+    } else if (config.period === "next_week") {
+      const start = new Date(now);
+      start.setDate(now.getDate() + (7 - now.getDay() + 1));
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      startStr = start.toISOString().split("T")[0];
+      endStr = end.toISOString().split("T")[0];
+    } else if (config.period === "next_2_weeks") {
+      const end = new Date(now);
+      end.setDate(now.getDate() + 14);
+      endStr = end.toISOString().split("T")[0];
+    } else if (config.period === "custom") {
+      const end = new Date(now);
+      end.setDate(now.getDate() + (config.customDays || 7));
+      endStr = end.toISOString().split("T")[0];
+    }
+
+    const periodLabel = 
+      config.period === "this_week"    ? "cette semaine" :
+      config.period === "next_week"    ? "la semaine prochaine" :
+      config.period === "next_2_weeks" ? "les 2 prochaines semaines" :
+      `les ${config.customDays} prochains jours`;
+
+    for (const ws of workspaces) {
+      const tasks = await Task.find({ workspaceId: ws._id });
+      const candidats = await Candidat.find({ workspaceId: ws._id });
+
+      const filtered = tasks.map(t => {
+        let grp = t.groupe || "";
+        if (!grp && t.name?.includes(" — Grp ")) grp = t.name.split(" — Grp ")[1];
+        if (!grp) grp = "1";
+        return { ...t.toObject(), client: ws.company || ws.name, groupe: grp };
+      }).filter(t => {
+        // Respecter la période configurée
+        if (!t.start || t.start < startStr || t.start > endStr) return false;
+
+        const cand = candidats.find(c => (c.theme || "").trim() === (t.group || "").trim() && String(c.groupe || "1") === String(t.groupe));
+        const cab = (cand?.cabinet || "").trim().toUpperCase();
+        return cab === "M2S" || cab === "M2S CONSULTING";
+      });
+
+      allTasks = [...allTasks, ...filtered];
+    }
+
+    if (allTasks.length === 0) {
+      console.log("[CRON] Aucune formation M2S à notifier pour cette période.");
+      return;
+    }
+
+    // Réutilisation du template d'email existant
+    // ... (suite du template modifié avec periodLabel)
+
+    // Réutilisation du template d'email existant
+    const tasksHtml = allTasks.map(t => `
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">${t.client || "—"}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${t.group}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${t.groupe}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${t.start}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${t.end}</td>
+      </tr>
+    `).join("");
+
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+        <h2 style="color: #2c3e50;">Récapitulatif Automatique : Formations M2S</h2>
+        <p>Bonjour,</p>
+        <p>Voici le récapitulatif automatique des formations <strong>M2S</strong> prévues pour <strong>${periodLabel}</strong> à travers tous vos espaces :</p>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+          <thead>
+            <tr style="background-color: #f2f2f2;">
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Client/Entreprise</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Thème</th>
+              <th style="padding: 8px; border: 1px solid #ddd;">Groupe</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Début</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Fin</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tasksHtml}
+          </tbody>
+        </table>
+        <p style="margin-top: 20px;">Cordialement,<br>Le système PlanAdmin</p>
+      </div>
+    `;
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+      tls: { rejectUnauthorized: false }
+    });
+
+    await transporter.sendMail({
+      from: `"PlanAdmin Auto" <${process.env.EMAIL_USER}>`,
+      to: config.recipientEmail,
+      subject: `[AUTO] Récapitulatif Hebdomadaire Formations M2S`,
+      html: htmlBody
+    });
+
+    config.lastRun = new Date();
+    await config.save();
+    console.log("[CRON] Email automatique envoyé avec succès à", config.recipientEmail);
+
+  } catch (e) {
+    console.error("[CRON] Erreur envoi automatique:", e);
+  }
+}
+
+function startM2SCron(config) {
+  if (m2sJob) {
+    m2sJob.stop();
+    m2sJob = null;
+  }
+
+  if (!config || !config.enabled) {
+    console.log("[CRON] Notifications automatiques désactivées.");
+    return;
+  }
+
+  // Définir l'expression cron selon la fréquence
+  let schedule = "";
+  if (config.frequency === "daily") {
+    schedule = "0 8 * * *"; // Tous les jours à 8h
+  } else if (config.frequency === "weekly_monday") {
+    schedule = "0 8 * * 1"; // Lundi à 8h
+  } else if (config.frequency === "monthly_1st") {
+    schedule = "0 8 1 * *"; // Le 1er du mois à 8h
+  }
+
+  if (schedule) {
+    m2sJob = cron.schedule(schedule, () => {
+      sendAutoM2SEmail();
+    });
+    console.log(`[CRON] Notifications automatiques activées (${config.frequency}) : ${schedule}`);
+  }
+}
+
+// Initialisation au démarrage
+setTimeout(async () => {
+  try {
+    const config = await M2SConfig.findOne();
+    if (config) startM2SCron(config);
+  } catch (e) {
+    console.error("Erreur init cron:", e);
+  }
+}, 5000);
+
 // ─────────────────────────────────────────────────────────────
 // 9. ROUTES — CANDIDATS
 // ─────────────────────────────────────────────────────────────
@@ -1317,63 +1683,173 @@ app.patch("/api/workspaces/:wsId/gantt/tasks", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// PATCH /group-dates — drag Gantt : met à jour tasks + candidats dans snapshot ET collections
+// Route à ajouter dans votre backend v2.2
+app.patch("/api/workspaces/:wsId/gantt/group-cancel", authenticateToken, async (req, res, next) => {
+  try {
+    const { wsId } = req.params;
+    const { theme, groupe } = req.body;
+
+    const themeClean = theme.trim();
+    const grpFilter = { $in: [String(groupe), Number(groupe)] };
+
+    // 1. On marque tous les candidats de ce groupe comme "Annulé"
+    await Candidat.updateMany(
+      { workspaceId: wsId, theme: themeClean, groupe: grpFilter },
+      { $set: { statut: "Annulé" } }
+    );
+
+    // 2. On met aussi à jour le snapshot Gantt pour la cohérence
+    const snap = await GanttSnapshot.findOne({ workspaceId: wsId });
+    if (snap) {
+      snap.candidats = snap.candidats.map(c => {
+        if (c.theme === themeClean && String(c.groupe) === String(groupe)) {
+          return { ...c.toObject(), statut: "Annulé" };
+        }
+        return c;
+      });
+      snap.markModified("candidats");
+      await snap.save();
+    }
+
+    res.json({ success: true, message: "Formation annulée en base de données" });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /group-extras — Mise à jour globale : Candidats, Référentiel Cabinet, Snapshot et Export
+app.patch("/api/workspaces/:wsId/gantt/group-extras", async (req, res, next) => {
+  try {
+    const wsId = req.params.wsId;
+    const { theme, groupe, cabinet, lieu, cout } = req.body;
+
+    if (!theme) return res.status(400).json({ success: false, message: "Thème requis" });
+
+    const grpNum = Number(groupe) || 1;
+
+    // 1. Mettre à jour tous les CANDIDATS de ce groupe spécifique
+    await Candidat.updateMany(
+      { workspaceId: wsId, theme: theme, groupe: grpNum },
+      { 
+        $set: { 
+          cabinet: cabinet, 
+          lieu: lieu, 
+          cout: cout,
+          "extraData.cabinet": cabinet,
+          "extraData.lieu": lieu,
+          "extraData.cout": cout
+        } 
+      }
+    );
+
+    // 2. Mettre à jour le RÉFÉRENTIEL CABINET (Base 3) pour ce thème
+    // Cela permet que les futurs imports ou nouveaux groupes utilisent ces infos
+    await Cabinet.findOneAndUpdate(
+      { workspaceId: wsId, intitule: theme },
+      { $set: { cabinet: cabinet, lieu: lieu, cout: cout } },
+      { upsert: true }
+    );
+
+    // 3. Mettre à jour le GANTT SNAPSHOT (pour l'affichage temps réel)
+    const snap = await GanttSnapshot.findOne({ workspaceId: wsId });
+    if (snap) {
+      snap.candidats = snap.candidats.map(c => {
+        if (c.theme === theme && String(c.groupe) === String(grpNum)) {
+          return { ...c.toObject(), cabinet, lieu };
+        }
+        return c;
+      });
+      snap.markModified("candidats");
+      await snap.save();
+    }
+
+    // 4. Mettre à jour la BASE D'EXPORT (pour le fichier Excel fusionné)
+    const exportBase = await ExportBase.findOne({ workspaceId: wsId });
+    if (exportBase) {
+      exportBase.rows = exportBase.rows.map(row => {
+        if (row.theme === theme && String(row.groupe) === String(grpNum)) {
+          return { ...row, cabinet, lieu, cout };
+        }
+        return row;
+      });
+      exportBase.markModified("rows");
+      await exportBase.save();
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Mise à jour globale effectuée",
+      updated: { theme, groupe: grpNum, cabinet, lieu, cout } 
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PATCH /group-dates — Version ultra-robuste
 app.patch("/api/workspaces/:wsId/gantt/group-dates", async (req, res, next) => {
   try {
     const wsId = req.params.wsId;
     const { theme, groupe, start, end } = req.body;
 
-    if (!theme || !start || !end)
-      return res.status(400).json({ success: false, message: "theme, start, end requis" });
+    if (!theme || !start || !end) {
+      return res.status(400).json({ success: false, message: "Données manquantes" });
+    }
 
-    const snap = await GanttSnapshot.findOne({ workspaceId: wsId });
-    if (!snap)
-      return res.status(404).json({ success: false, message: "Snapshot introuvable — lancez d'abord un import" });
+    // 1. On nettoie les entrées (Espaces, Types)
+    const themeClean = theme.trim();
+    const grpStr = String(groupe).trim();
+    const grpNum = parseInt(groupe, 10);
 
-    const grpStr = String(groupe || "1");
-    const grpNum = Number(groupe) || 1;
+    // 2. Filtre de recherche flexible (String ou Number)
+    const groupFilter = { $in: [grpStr, grpNum] };
 
-    // Patch tasks dans le snapshot
-    snap.tasks = snap.tasks.map(t =>
-      t.group === theme && String(t.groupe) === grpStr
-        ? { ...t.toObject(), start, end }
-        : t
-    );
-
-    // Patch candidats dans le snapshot
-    snap.candidats = snap.candidats.map(c =>
-      c.theme === theme && String(c.groupe) === grpStr
-        ? { ...c.toObject(), dateDebut: start, dateFin: end }
-        : c
-    );
-
-    snap.savedAt = new Date();
-    snap.markModified("tasks");
-    snap.markModified("candidats");
-    await snap.save();
-
-    // Synchro parallèle dans les collections Task, Candidat, Document
-    await Promise.all([
+    // 3. MISE À JOUR DES COLLECTIONS RÉELLES (La source de vérité)
+    // On met à jour Task, Candidat et Document en même temps
+    const results = await Promise.all([
+      // Mise à jour des tâches Gantt
       Task.updateMany(
-        { workspaceId: wsId, group: theme, groupe: grpNum },
-        { start, end }
+        { workspaceId: wsId, group: themeClean, groupe: groupFilter },
+        { $set: { start, end } }
       ),
+      // Mise à jour de tous les candidats liés
       Candidat.updateMany(
-        { workspaceId: wsId, theme, groupe: grpNum },
-        { dateDebut: start, dateFin: end }
+        { workspaceId: wsId, theme: themeClean, groupe: groupFilter },
+        { $set: { dateDebut: start, dateFin: end } }
       ),
+      // Mise à jour des documents d'émargement liés
       Document.updateMany(
-        { workspaceId: wsId, theme, groupe: grpNum },
-        { dateDoc: start }
-      ),
+        { workspaceId: wsId, theme: themeClean, groupe: groupFilter },
+        { $set: { dateDoc: start } }
+      )
     ]);
 
-    res.json({
-      success: true,
-      savedAt: snap.savedAt,
-      patched: { theme, groupe: grpStr, start, end },
+    // 4. MISE À JOUR DU SNAPSHOT (Le cache)
+    const snap = await GanttSnapshot.findOne({ workspaceId: wsId });
+    if (snap) {
+      snap.tasks = snap.tasks.map(t =>
+        t.group === themeClean && String(t.groupe) === grpStr 
+          ? { ...t.toObject(), start, end } : t
+      );
+      snap.candidats = snap.candidats.map(c =>
+        c.theme === themeClean && String(c.groupe) === grpStr 
+          ? { ...c.toObject(), dateDebut: start, dateFin: end } : c
+      );
+      snap.markModified("tasks");
+      snap.markModified("candidats");
+      await snap.save();
+    }
+
+    console.log(`Sync réussie: ${themeClean} G${groupe} -> ${start}`);
+    
+    res.json({ 
+      success: true, 
+      modifiedCount: results[1].modifiedCount // Nombre de candidats mis à jour
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    console.error("Erreur Backend group-dates:", e);
+    next(e);
+  }
 });
 
 // DELETE — supprime le snapshot (ex: réimport complet)

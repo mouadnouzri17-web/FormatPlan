@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import logo from '../assets/logoM2S.png'
+import { GoogleLogin } from '@react-oauth/google';
 
 export default function LoginPage() {
-  const { login, register } = useAuth();
+  const { login, register, loginWithGoogle } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
@@ -18,6 +19,18 @@ export default function LoginPage() {
     const t = setTimeout(() => setMounted(true), 50);
     return () => clearTimeout(t);
   }, []);
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setLoading(true);
+    setError("");
+    try {
+      await loginWithGoogle(credentialResponse.credential);
+    } catch (err) {
+      setError(err.message || "Erreur lors de la connexion Google");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -310,6 +323,32 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {/* Séparateur */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            margin: "24px 0",
+            gap: 12,
+          }}>
+            <div style={{ flex: 1, height: 1, background: "#e3e3e2" }} />
+            <span style={{ fontSize: 12, color: "#9b9a97", fontWeight: 500 }}>OU</span>
+            <div style={{ flex: 1, height: 1, background: "#e3e3e2" }} />
+          </div>
+
+          {/* Google Login */}
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError("Erreur lors de l'authentification Google.")}
+              useOneTap
+              theme="outline"
+              size="large"
+              width="100%"
+              text="continue_with"
+              shape="rectangular"
+            />
+          </div>
 
           {/* Toggle Register / Login */}
           <div style={{ textAlign: "center", marginTop: 20 }}>

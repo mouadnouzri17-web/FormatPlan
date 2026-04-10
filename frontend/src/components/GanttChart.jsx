@@ -2,7 +2,7 @@ import React , { useState, useEffect, useRef, useCallback, useMemo, memo  } from
 import { useAuth } from "../contexts/AuthContext";
 import { createPortal } from "react-dom";
 import logo from '../assets/logoM2S.png'
-
+import { useGoogleLogin } from '@react-oauth/google';
 
 
 import * as XLSX from "xlsx";
@@ -168,7 +168,7 @@ const generateAttendancePDF = (doc, allCandidates) => {
 };
 
 const API_BASE = (typeof import_meta_env !== "undefined" && import_meta_env?.VITE_API_URL)
-  || "https://formatplan-production.up.railway.app/api";
+  || "http://localhost:5000/api" || "https://formatplan-production.up.railway.app/api";
 
 function norm(o) {
   if (!o) return o;
@@ -2754,80 +2754,86 @@ const saveEdit = async () => {
 // ═══════════════════════════════════════════════════════════════
 // GANTT BAR
 // ═══════════════════════════════════════════════════════════════
-const GBar = memo(function GBar({ task, zoom, viewStart, totalDays, onUpdate, wd, sh, vacs, effectiveSlot, isLiveConflict, conflictTypes, prog }) {
-  const dr  = useRef(null);
+const GBar = memo(function GBar({ 
+  task, zoom, viewStart, totalDays, onUpdate, wd, sh, vacs, 
+  effectiveSlot, isLiveConflict, conflictTypes, prog, isCancelled 
+}) {
+  const dr = useRef(null);
   const [prev, setPrev] = useState(null);
  
-  const s   = gdb(viewStart, pd(task.start)), dur = gdb(pd(task.start), pd(task.end)) + 1;
+  const s = gdb(viewStart, pd(task.start)), dur = gdb(pd(task.start), pd(task.end)) + 1;
   if (s + dur <= 0 || s >= totalDays) return null;
  
   const ds = prev ? prev.start : task.start;
   const de = prev ? prev.end   : task.end;
  
-  const isHD    = task.halfDay === true;
-  const hdSlot  = effectiveSlot || task.slot || "matin";
-  const dayOff  = gdb(viewStart, pd(ds));
-  const halfW   = zoom.halfDay ? zoom.cw / 2 : zoom.cw;
+  const isHD = task.halfDay === true;
+  const hdSlot = effectiveSlot || task.slot || "matin";
+  const dayOff = gdb(viewStart, pd(ds));
+  const halfW = zoom.halfDay ? zoom.cw / 2 : zoom.cw;
   const slotOff = zoom.halfDay && isHD && hdSlot === "après-midi" ? halfW : 0;
-  const left    = dayOff * zoom.cw + slotOff;
-  const width   = Math.max(isHD && zoom.halfDay ? halfW : (gdb(pd(ds), pd(de)) + 1) * zoom.cw, zoom.halfDay ? halfW : zoom.cw);
+  const left = dayOff * zoom.cw + slotOff;
+  const width = Math.max(isHD && zoom.halfDay ? halfW : (gdb(pd(ds), pd(de)) + 1) * zoom.cw, zoom.halfDay ? halfW : zoom.cw);
  
   const dragging = !!prev;
-  const tag      = grpTag(task.group);
-  const HW       = zoom.cw >= 28 ? 8 : 5;
-  const HP       = Math.max(0, HW - 3);
-  const dtype    = dr.current?.type ?? null;
+  const tag = grpTag(task.group);
+  const HW = zoom.cw >= 28 ? 8 : 5;
+  const HP = Math.max(0, HW - 3);
+  const dtype = dr.current?.type ?? null;
  
   const conflictStyle = () => {
-    if (!isLiveConflict || dragging) return {};
-    if (conflictTypes?.has("overlap") || conflictTypes?.has("salle_pleine"))      return { boxShadow:"0 0 0 2px rgba(212,76,71,0.8)" };
-    if (conflictTypes?.has("candidat_double") || conflictTypes?.has("halfday"))   return { boxShadow:"0 0 0 2px rgba(193,76,138,0.8)" };
-    if (conflictTypes?.has("vacation")) return { boxShadow:"0 0 0 2px rgba(51,126,169,0.8)" };
-    if (conflictTypes?.has("holiday"))  return { boxShadow:"0 0 0 2px rgba(68,131,97,0.8)" };
-    if (conflictTypes?.has("weekend"))  return { boxShadow:"0 0 0 2px rgba(203,145,47,0.8)" };
+    if (isCancelled || !isLiveConflict || dragging) return {};
+    if (conflictTypes?.has("overlap") || conflictTypes?.has("salle_pleine")) return { boxShadow: "0 0 0 2px rgba(212,76,71,0.8)" };
+    if (conflictTypes?.has("candidat_double") || conflictTypes?.has("halfday")) return { boxShadow: "0 0 0 2px rgba(193,76,138,0.8)" };
+    if (conflictTypes?.has("vacation")) return { boxShadow: "0 0 0 2px rgba(51,126,169,0.8)" };
+    if (conflictTypes?.has("holiday")) return { boxShadow: "0 0 0 2px rgba(68,131,97,0.8)" };
+    if (conflictTypes?.has("weekend")) return { boxShadow: "0 0 0 2px rgba(203,145,47,0.8)" };
     return {};
   };
+
   const barBg = () => {
+    if (isCancelled) return "rgba(220, 220, 225, 0.6)"; // Gris pour l'annulé
     if (!isLiveConflict) return tag.bg;
-    if (conflictTypes?.has("salle_pleine")||conflictTypes?.has("overlap"))        return "rgba(253,224,220,0.85)";
-    if (conflictTypes?.has("candidat_double")||conflictTypes?.has("halfday"))     return "rgba(245,224,233,0.85)";
+    if (conflictTypes?.has("salle_pleine") || conflictTypes?.has("overlap")) return "rgba(253,224,220,0.85)";
+    if (conflictTypes?.has("candidat_double") || conflictTypes?.has("halfday")) return "rgba(245,224,233,0.85)";
     if (conflictTypes?.has("vacation")) return "rgba(211,229,239,0.85)";
-    if (conflictTypes?.has("holiday"))  return "rgba(219,237,219,0.85)";
-    if (conflictTypes?.has("weekend"))  return "rgba(253,236,200,0.85)";
+    if (conflictTypes?.has("holiday")) return "rgba(219,237,219,0.85)";
+    if (conflictTypes?.has("weekend")) return "rgba(253,236,200,0.85)";
     return tag.bg;
   };
+
   const dotColor = () => {
-    if (!isLiveConflict) return null;
-    if (conflictTypes?.has("salle_pleine")||conflictTypes?.has("overlap"))       return "#d44c47";
-    if (conflictTypes?.has("candidat_double")||conflictTypes?.has("halfday"))    return "#c14c8a";
+    if (isCancelled || !isLiveConflict) return null;
+    if (conflictTypes?.has("salle_pleine") || conflictTypes?.has("overlap")) return "#d44c47";
+    if (conflictTypes?.has("candidat_double") || conflictTypes?.has("halfday")) return "#c14c8a";
     if (conflictTypes?.has("vacation")) return "#337ea9";
-    if (conflictTypes?.has("holiday"))  return "#448361";
-    if (conflictTypes?.has("weekend"))  return "#cb912f";
+    if (conflictTypes?.has("holiday")) return "#448361";
+    if (conflictTypes?.has("weekend")) return "#cb912f";
     return "#d44c47";
   };
   const dot = dotColor();
  
   function startDrag(e, type) {
-    if (isHD && type !== "move") return; 
+    if (isCancelled || (isHD && type !== "move")) return; 
     e.stopPropagation(); e.preventDefault();
     dr.current = { type, startX: e.clientX, os: task.start, oe: task.end };
     setPrev({ start: task.start, end: task.end });
-    document.body.style.cursor    = type === "move" ? "grabbing" : "col-resize";
+    document.body.style.cursor = type === "move" ? "grabbing" : "col-resize";
     document.body.style.userSelect = "none";
     const mv = ev => {
       const d = Math.round((ev.clientX - dr.current.startX) / zoom.cw);
       const r = dr.current;
-      if (r.type === "move")    setPrev({ start: d2s(ad(pd(r.os), d)), end: d2s(ad(pd(r.oe), d)) });
+      if (r.type === "move") setPrev({ start: d2s(ad(pd(r.os), d)), end: d2s(ad(pd(r.oe), d)) });
       else if (r.type === "rr") setPrev({ start: r.os, end: rezEnd(r.os, r.oe, d, wd, sh, vacs) });
-      else                      setPrev({ start: rezStart(r.os, r.oe, d, wd, sh, vacs), end: r.oe });
+      else setPrev({ start: rezStart(r.os, r.oe, d, wd, sh, vacs), end: r.oe });
     };
     const up = ev => {
-      const d  = Math.round((ev.clientX - dr.current.startX) / zoom.cw);
-      const r  = dr.current;
+      const d = Math.round((ev.clientX - dr.current.startX) / zoom.cw);
+      const r = dr.current;
       let cm;
-      if (r.type === "move")    cm = moveSnap(r.os, r.oe, d, wd, sh, vacs);
+      if (r.type === "move") cm = moveSnap(r.os, r.oe, d, wd, sh, vacs);
       else if (r.type === "rr") cm = { start: r.os, end: rezEnd(r.os, r.oe, d, wd, sh, vacs) };
-      else                      cm = { start: rezStart(r.os, r.oe, d, wd, sh, vacs), end: r.oe };
+      else cm = { start: rezStart(r.os, r.oe, d, wd, sh, vacs), end: r.oe };
       onUpdate(task.id, cm.start, cm.end);
       dr.current = null; setPrev(null);
       document.body.style.cursor = ""; document.body.style.userSelect = "";
@@ -2837,27 +2843,44 @@ const GBar = memo(function GBar({ task, zoom, viewStart, totalDays, onUpdate, wd
   }
  
   return (
-    <div style={{ position:"absolute",left,width,top:"50%",transform:"translateY(-50%)",height:dragging?22:18,zIndex:dragging?20:isHD?6:5,userSelect:"none" }}>
+    <div style={{ 
+      position: "absolute", left, width, top: "50%", transform: "translateY(-50%)", 
+      height: dragging ? 22 : 18, zIndex: dragging ? 20 : isHD ? 6 : 5, 
+      userSelect: "none", 
+      opacity: isCancelled ? 0.5 : 1 
+    }}>
       {dragging && (
-        <div style={{ position:"absolute",bottom:"calc(100% + 6px)",left:"50%",transform:"translateX(-50%)",background:"#37352f",color:"#fff",borderRadius:4,padding:"3px 9px",fontSize:11,whiteSpace:"nowrap",pointerEvents:"none",zIndex:50,boxShadow:"0 4px 12px rgba(0,0,0,0.2)",display:"flex",gap:8,alignItems:"center" }}>
-          <span style={{ color:"rgba(255,255,255,0.45)",fontSize:10 }}>{dtype==="move"?"Déplacer":dtype==="rr"?"→ Fin":"← Début"}</span>
+        <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", background: "#37352f", color: "#fff", borderRadius: 4, padding: "3px 9px", fontSize: 11, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.2)", display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>{dtype === "move" ? "Déplacer" : dtype === "rr" ? "→ Fin" : "← Début"}</span>
           <span>{fmt(ds)} → {fmt(de)}</span>
-          <span style={{ color:"rgba(255,255,255,0.6)",fontFamily:"monospace" }}>{calcWD(ds,de,wd,sh,vacs)}j</span>
+          <span style={{ color: "rgba(255,255,255,0.6)", fontFamily: "monospace" }}>{calcWD(ds, de, wd, sh, vacs)}j</span>
         </div>
       )}
-      {!isHD && <div onMouseDown={e=>startDrag(e,"rl")} style={{ position:"absolute",left:-HP,top:0,bottom:0,width:HW+HP,cursor:"col-resize",zIndex:5,display:"flex",alignItems:"center" }}><div style={{ width:2,height:"55%",borderRadius:99,background:"rgba(55,53,47,0.25)",marginLeft:HP }} /></div>}
-      <div onMouseDown={e=>startDrag(e,"move")} style={{ position:"absolute",left:isHD?1:HW,right:isHD?1:HW,top:0,bottom:0,borderRadius:3,overflow:"hidden",cursor:isHD?"default":dragging?"grabbing":"grab",...conflictStyle() }}>
-        <div style={{ position:"absolute",inset:0,background:barBg(),border:`1px solid ${tag.bd||"transparent"}`,borderRadius:3 }} />
-        <div style={{ position:"absolute",top:0,left:0,bottom:0,width:`${prog.pct}%`,background:tag.text,opacity:0.2,borderRadius:"3px 0 0 3px",transition:"width 0.3s" }} />
+      {!isHD && !isCancelled && <div onMouseDown={e => startDrag(e, "rl")} style={{ position: "absolute", left: -HP, top: 0, bottom: 0, width: HW + HP, cursor: "col-resize", zIndex: 5, display: "flex", alignItems: "center" }}><div style={{ width: 2, height: "55%", borderRadius: 99, background: "rgba(55,53,47,0.25)", marginLeft: HP }} /></div>}
+      <div onMouseDown={e => startDrag(e, "move")} style={{ 
+        position: "absolute", left: isHD ? 1 : HW, right: isHD ? 1 : HW, top: 0, bottom: 0, 
+        borderRadius: 3, overflow: "hidden", 
+        cursor: isCancelled ? "default" : dragging ? "grabbing" : "grab", 
+        ...conflictStyle(),
+        border: isCancelled ? "1px dashed #999" : `1px solid ${tag.bd || "transparent"}`,
+      }}>
+        <div style={{ position: "absolute", inset: 0, background: barBg() }} />
+        {!isCancelled && <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: `${prog.pct}%`, background: tag.text, opacity: 0.2, borderRadius: "3px 0 0 3px", transition: "width 0.3s" }} />}
         {(width - (isHD ? 2 : HW * 2)) > 36 && (
-          <div style={{ position:"absolute",inset:0,display:"flex",alignItems:"center",padding:"0 6px",pointerEvents:"none",gap:4,overflow:"hidden" }}>
-            {dot && <div style={{ width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0,boxShadow:"0 0 0 1.5px rgba(255,255,255,0.8)" }} />}
-            {isHD && <span style={{ fontSize:8,fontWeight:800,color:hdSlot==="après-midi"?"#337ea9":"#cb912f",background:hdSlot==="après-midi"?"rgba(51,126,169,0.18)":"rgba(203,145,47,0.18)",borderRadius:2,padding:"1px 3px",flexShrink:0,letterSpacing:"0.06em" }}>{hdSlot==="matin"?"AM":"PM"}</span>}
-            <span style={{ fontSize:10,fontWeight:500,color:tag.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1 }}>{task.group}{task.groupe?` — G${task.groupe}`:""}</span>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 6px", pointerEvents: "none", gap: 4, overflow: "hidden" }}>
+            {dot && <div style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flexShrink: 0, boxShadow: "0 0 0 1.5px rgba(255,255,255,0.8)" }} />}
+            {isHD && <span style={{ fontSize: 8, fontWeight: 800, color: isCancelled ? "#999" : (hdSlot === "après-midi" ? "#337ea9" : "#cb912f"), background: isCancelled ? "#eee" : (hdSlot === "après-midi" ? "rgba(51,126,169,0.18)" : "rgba(203,145,47,0.18)"), borderRadius: 2, padding: "1px 3px", flexShrink: 0, letterSpacing: "0.06em" }}>{hdSlot === "matin" ? "AM" : "PM"}</span>}
+            <span style={{ 
+              fontSize: 10, fontWeight: 500, color: isCancelled ? "#888" : tag.text, 
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+              textDecoration: isCancelled ? "line-through" : "none"
+            }}>
+              {task.group}{task.groupe ? ` — G${task.groupe}` : ""}{isCancelled ? " (ANNULÉ)" : ""}
+            </span>
           </div>
         )}
       </div>
-      {!isHD && <div onMouseDown={e=>startDrag(e,"rr")} style={{ position:"absolute",right:-HP,top:0,bottom:0,width:HW+HP,cursor:"col-resize",zIndex:5,display:"flex",alignItems:"center",justifyContent:"flex-end" }}><div style={{ width:2,height:"55%",borderRadius:99,background:"rgba(55,53,47,0.25)",marginRight:HP }} /></div>}
+      {!isHD && !isCancelled && <div onMouseDown={e => startDrag(e, "rr")} style={{ position: "absolute", right: -HP, top: 0, bottom: 0, width: HW + HP, cursor: "col-resize", zIndex: 5, display: "flex", alignItems: "center", justifyContent: "flex-end" }}><div style={{ width: 2, height: "55%", borderRadius: 99, background: "rgba(55,53,47,0.25)", marginRight: HP }} /></div>}
     </div>
   );
 });
@@ -2902,10 +2925,14 @@ const BackgroundStripes = memo(function BackgroundStripes({ totalDays, projStart
   );
 });
 
-const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, todayOff, wd, sh, vacs, onEdit, onDelete, onUpdate, onUpdateSlot, registerScrollable, unregisterScrollable, slotMap, isLiveConflict, conflictTypes, wdays, prog, candidatCount, onOpenDrawer  }) {
+const GRow = memo(function GRow({ 
+  task, SC, cs, zoom, projStart, totalDays, todayOff, wd, sh, vacs, 
+  onEdit, onDelete, onUpdate, onUpdateSlot, registerScrollable, 
+  unregisterScrollable, slotMap, isLiveConflict, conflictTypes, 
+  wdays, prog, candidatCount, onOpenDrawer, isCancelled 
+}) {
   const [hov, setHov] = useState(false);
   
-  // ── Lookup par key (fix responsive) ──
   const scByKey = useMemo(() => {
     const m = {};
     SC.forEach(col => { m[col.key] = col; });
@@ -2925,98 +2952,116 @@ const GRow = memo(function GRow({ task, SC, cs, zoom, projStart, totalDays, toda
   if (!displayGrp && task.name?.includes(" — Grp ")) displayGrp = task.name.split(" — Grp ")[1];
  
   const getDot = () => {
+    if (isCancelled) return null;
     if (!isLiveConflict) return null;
-    if (conflictTypes?.has("salle_pleine")||conflictTypes?.has("overlap"))       return "#d44c47";
-    if (conflictTypes?.has("candidat_double")||conflictTypes?.has("halfday"))    return "#c14c8a";
+    if (conflictTypes?.has("salle_pleine") || conflictTypes?.has("overlap")) return "#d44c47";
+    if (conflictTypes?.has("candidat_double") || conflictTypes?.has("halfday")) return "#c14c8a";
     if (conflictTypes?.has("vacation")) return "#337ea9";
-    if (conflictTypes?.has("holiday"))  return "#448361";
-    if (conflictTypes?.has("weekend"))  return "#cb912f";
+    if (conflictTypes?.has("holiday")) return "#448361";
+    if (conflictTypes?.has("weekend")) return "#cb912f";
     return "#d44c47";
   };
   const dot = getDot();
  
   const rowBg = () => {
     if (hov) return "rgba(55,53,47,0.04)";
+    if (isCancelled) return "rgba(245, 245, 245, 0.5)";
     if (!isLiveConflict) return "#fff";
-    if (conflictTypes?.has("salle_pleine")||conflictTypes?.has("overlap"))       return "rgba(253,224,220,0.18)";
-    if (conflictTypes?.has("candidat_double")||conflictTypes?.has("halfday"))    return "rgba(245,224,233,0.18)";
-    if (conflictTypes?.has("vacation")) return "rgba(211,229,239,0.18)";
-    if (conflictTypes?.has("holiday"))  return "rgba(219,237,219,0.18)";
-    if (conflictTypes?.has("weekend"))  return "rgba(253,236,200,0.18)";
     return "rgba(253,224,220,0.18)";
   };
  
   return (
-    <div style={{ display:"flex",height:RH,background:rowBg(),borderBottom:`1px solid ${T.pageBdr}`,transition:"background 0.06s" }} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}>
-      <div style={{ display:"flex",flexShrink:0 }}>
+    <div style={{ 
+      display: "flex", height: RH, background: rowBg(), 
+      borderBottom: `1px solid ${T.pageBdr}`, transition: "background 0.06s" 
+    }} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
+      <div style={{ display: "flex", flexShrink: 0, opacity: isCancelled ? 0.6 : 1 }}>
 
-        {/* Thème — toujours affiché */}
-        <div style={{ ...cs(scByKey["group"].sw),padding:"0 8px",gap:5,justifyContent:"flex-start" }}>
-          {dot
-            ? <div style={{ width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0,boxShadow:`0 0 0 2px ${dot}33`,animation:conflictTypes?.has("overlap")?"pulse-conflict 1.5s ease-in-out infinite":"none" }} />
-            : <div style={{ width:8,height:8,borderRadius:2,background:pal.text,flexShrink:0 }} />
-          }
-          <span style={{ fontSize:13,fontWeight:600,color:T.pageText,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={task.group} onClick={onOpenDrawer} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>{task.group}</span>
-          <div style={{ display:"flex",gap:1,flexShrink:0,opacity:hov?1:0,transition:"opacity 0.1s" }}>
-            <button onClick={onEdit}   style={{ width:20,height:20,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3,border:"none",background:"transparent",cursor:"pointer",color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(55,53,47,0.1)";e.currentTarget.style.color=T.pageText;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Edit2 style={{ width:11,height:11 }} /></button>
-            <button onClick={onDelete} style={{ width:20,height:20,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:3,border:"none",background:"transparent",cursor:"pointer",color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:11,height:11 }} /></button>
+        {/* Thème */}
+        <div style={{ ...cs(scByKey["group"].sw), padding: "0 8px", gap: 5, justifyContent: "flex-start" }}>
+          {isCancelled ? (
+            <div style={{ width: 8, height: 8, borderRadius: "50%", border: "1.5px solid #999", flexShrink: 0 }} />
+          ) : dot ? (
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flexShrink: 0, boxShadow: `0 0 0 2px ${dot}33` }} />
+          ) : (
+            <div style={{ width: 8, height: 8, borderRadius: 2, background: pal.text, flexShrink: 0 }} />
+          )}
+          <span 
+            style={{ 
+              fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              color: isCancelled ? "#999" : T.pageText,
+              textDecoration: isCancelled ? "line-through" : "none",
+              fontStyle: isCancelled ? "italic" : "normal",
+              cursor: "pointer"
+            }} 
+            title={isCancelled ? `${task.group} (ANNULÉ)` : task.group} 
+            onClick={onOpenDrawer}
+          >
+            {task.group}
+          </span>
+          <div style={{ display: "flex", gap: 1, flexShrink: 0, opacity: hov ? 1 : 0 }}>
+            <button onClick={onEdit} style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }}><Edit2 style={{ width: 11, height: 11 }} /></button>
+            <button onClick={onDelete} style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, border: "none", background: "transparent", cursor: "pointer", color: T.pageTer }}><Trash2 style={{ width: 11, height: 11 }} /></button>
           </div>
         </div>
 
-        {/* Grp — toujours affiché */}
-        <div style={{ ...cs(scByKey["groupe"].sw),justifyContent:"center",padding:"0 4px" }}>
-          <span style={{ fontSize:12,fontWeight:600,color:T.pageSub }}>{displayGrp?`G${displayGrp}`:"—"}</span>
+        {/* Grp */}
+        <div style={{ ...cs(scByKey["groupe"].sw), justifyContent: "center", padding: "0 4px" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: isCancelled ? "#bbb" : T.pageSub }}>{displayGrp ? `G${displayGrp}` : "—"}</span>
         </div>
 
-        {/* Cand. — toujours affiché */}
-        <div style={{ ...cs(scByKey["count"].sw),justifyContent:"center",padding:"0 4px" }}>
-          <span style={{ fontSize:11,fontFamily:"monospace",color:candidatCount>0?T.pageSub:T.pageTer }}>{candidatCount>0?candidatCount:"—"}</span>
+        {/* Cand. */}
+        <div style={{ ...cs(scByKey["count"].sw), justifyContent: "center", padding: "0 4px" }}>
+          <span style={{ fontSize: 11, fontFamily: "monospace", color: isCancelled ? "#ccc" : (candidatCount > 0 ? T.pageSub : T.pageTer) }}>{candidatCount > 0 ? candidatCount : "—"}</span>
         </div>
 
-        {/* Jours / AM-PM — masqué sur mobile si filtré */}
+        {/* Jours / AM-PM */}
         {scByKey["wdays"] && (
           <div style={{ ...cs(scByKey["wdays"].sw), justifyContent: "center", padding: "0 4px" }}>
             {isHD ? (
-              <div style={{ display:"flex",borderRadius:4,border:`1px solid ${T.pageBdr}`,overflow:"hidden",background:"#fff" }}>
-                <button onClick={() => onUpdateSlot(task.id, "matin")} style={{ padding:"2px 4px",fontSize:"8px",fontWeight:"800",border:"none",cursor:"pointer",background:effectiveSlot==="matin"?"rgba(203,145,47,0.2)":"transparent",color:effectiveSlot==="matin"?"#cb912f":T.pageTer,borderRight:`1px solid ${T.pageBdr}` }}>AM</button>
-                <button onClick={() => onUpdateSlot(task.id, "après-midi")} style={{ padding:"2px 4px",fontSize:"8px",fontWeight:"800",border:"none",cursor:"pointer",background:effectiveSlot==="après-midi"?"rgba(51,126,169,0.2)":"transparent",color:effectiveSlot==="après-midi"?"#337ea9":T.pageTer }}>PM</button>
+              <div style={{ display: "flex", borderRadius: 4, border: `1px solid ${T.pageBdr}`, overflow: "hidden", background: "#fff", opacity: isCancelled ? 0.5 : 1 }}>
+                <button disabled={isCancelled} onClick={() => onUpdateSlot(task.id, "matin")} style={{ padding: "2px 4px", fontSize: "8px", fontWeight: "800", border: "none", cursor: isCancelled ? "default" : "pointer", background: effectiveSlot === "matin" ? "rgba(203,145,47,0.2)" : "transparent", color: effectiveSlot === "matin" ? "#cb912f" : T.pageTer, borderRight: `1px solid ${T.pageBdr}` }}>AM</button>
+                <button disabled={isCancelled} onClick={() => onUpdateSlot(task.id, "après-midi")} style={{ padding: "2px 4px", fontSize: "8px", fontWeight: "800", border: "none", cursor: isCancelled ? "default" : "pointer", background: effectiveSlot === "après-midi" ? "rgba(51,126,169,0.2)" : "transparent", color: effectiveSlot === "après-midi" ? "#337ea9" : T.pageTer }}>PM</button>
               </div>
             ) : (
-              <span style={{ fontSize:12,fontFamily:"monospace",color:T.pageSub }}>{wdays}</span>
+              <span style={{ fontSize: 12, fontFamily: "monospace", color: isCancelled ? "#ccc" : T.pageSub }}>{wdays}</span>
             )}
           </div>
         )}
 
-        {/* Début — toujours affiché */}
-        <div style={{ ...cs(scByKey["start"].sw),justifyContent:"center",padding:"0 4px",cursor:"pointer" }}
-          title="Double-clic pour modifier"
-          onDoubleClick={onEdit}>
-          <span style={{ fontSize:11,fontFamily:"monospace",color:T.pageSub }}>{fmt(task.start)}</span>
+        {/* Début */}
+        <div style={{ ...cs(scByKey["start"].sw), justifyContent: "center", padding: "0 4px" }}>
+          <span style={{ fontSize: 11, fontFamily: "monospace", color: isCancelled ? "#ccc" : T.pageSub }}>{fmt(task.start)}</span>
         </div>
 
-        {/* Avancement — masqué sur tablette/mobile si filtré */}
+        {/* Avancement */}
         {scByKey["prog"] && (
-          <div style={{ ...cs(scByKey["prog"].sw),padding:"0 10px",flexDirection:"column",alignItems:"stretch",justifyContent:"center",gap:3 }}>
-            <div style={{ height:3,background:"rgba(55,53,47,0.1)",borderRadius:99,overflow:"hidden" }}>
-              <div style={{ height:"100%",width:`${prog.pct}%`,background:prog.pct===100?T.tagGreen.text:"rgba(55,53,47,0.45)",borderRadius:99 }} />
+          <div style={{ ...cs(scByKey["prog"].sw), padding: "0 10px", flexDirection: "column", alignItems: "stretch", justifyContent: "center", gap: 3 }}>
+            <div style={{ height: 3, background: "rgba(55,53,47,0.1)", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${isCancelled ? 0 : prog.pct}%`, background: isCancelled ? "#ccc" : (prog.pct === 100 ? T.tagGreen.text : "rgba(55,53,47,0.45)"), borderRadius: 99 }} />
             </div>
-            <span style={{ fontSize:10,color:T.pageTer,fontFamily:"monospace" }}>{prog.pct}%</span>
+            <span style={{ fontSize: 10, color: T.pageTer, fontFamily: "monospace" }}>{isCancelled ? 0 : prog.pct}%</span>
           </div>
         )}
 
-        {/* Fin — toujours affiché */}
-        <div style={{ ...cs(scByKey["end"].sw),justifyContent:"center",padding:"0 4px",borderRight:`1px solid ${T.pageBdr}`,cursor:"pointer" }}
-          title="Double-clic pour modifier"
-          onDoubleClick={onEdit}>
-          <span style={{ fontSize:11,fontFamily:"monospace",color:T.pageSub }}>{fmt(task.end)}</span>
+        {/* Fin */}
+        <div style={{ ...cs(scByKey["end"].sw), justifyContent: "center", padding: "0 4px", borderRight: `1px solid ${T.pageBdr}` }}>
+          <span style={{ fontSize: 11, fontFamily: "monospace", color: isCancelled ? "#ccc" : T.pageSub }}>{fmt(task.end)}</span>
         </div>
 
       </div>
-      {/* Zone barre */}
-      <div style={{ flex:1,overflow:"hidden" }}>
-        <div ref={ref} style={{ overflowX:"hidden",width:"100%",height:"100%" }}>
-          <div style={{ width:totalDays*zoom.cw,height:"100%",position:"relative" }}>
-            <GBar task={task} zoom={zoom} viewStart={projStart} totalDays={totalDays} onUpdate={onUpdate} wd={wd} sh={sh} vacs={vacs} effectiveSlot={effectiveSlot} isLiveConflict={isLiveConflict} conflictTypes={conflictTypes} prog={prog} />
+
+      {/* Zone graphique (Gantt) */}
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        <div ref={ref} style={{ overflowX: "hidden", width: "100%", height: "100%" }}>
+          <div style={{ width: totalDays * zoom.cw, height: "100%", position: "relative" }}>
+            <GBar 
+              task={task} zoom={zoom} viewStart={projStart} totalDays={totalDays} 
+              onUpdate={onUpdate} wd={wd} sh={sh} vacs={vacs} 
+              effectiveSlot={effectiveSlot} isLiveConflict={isLiveConflict} 
+              conflictTypes={conflictTypes} prog={prog} 
+              isCancelled={isCancelled} 
+            />
           </div>
         </div>
       </div>
@@ -3551,12 +3596,650 @@ function RichDatePicker({ value, onChange, min, wd, sh, vacs, groupRows, current
   );
 }
 
+// ================================================================
+//  STYLE PARTAGÉ — source de vérité commune Word + PDF
+// ================================================================
+const STYLE = {
+  // Palette
+  color: {
+    primary:  { hex: "1B3A6B", rgb: [27,  58, 107] },   // bleu marine
+    accent:   { hex: "2E6DB4", rgb: [46, 109, 180] },   // bleu ciel
+    light:    { hex: "EDF2FA", rgb: [237, 242, 250] },  // fond label
+    mid:      { hex: "D0DFEF", rgb: [208, 223, 239] },  // inactif
+    white:    { hex: "FFFFFF", rgb: [255, 255, 255] },
+    check:    { hex: "B03A2E", rgb: [176,  58,  46] },  // rouge X
+    border:   { hex: "A0B4CC", rgb: [160, 180, 204] },
+    text:     { hex: "1E1E1E", rgb: [30,  30,  30]  },
+    sub:      { hex: "666666", rgb: [100, 100, 100] },
+    rowAlt:   { hex: "F5F8FD", rgb: [245, 248, 253] },  // rangée paire
+  },
+
+  // Polices
+  font: {
+    docx: "Calibri",
+    pdf:  "helvetica",
+  },
+
+  // Tailles de texte (en pt pour docx [half-pt * 2], en mm pour pdf)
+  // docx: size en half-points → 18 = 9pt, 20 = 10pt, 22 = 11pt, 26 = 13pt
+  size: {
+    headerSub:  { docx: 15, pdf: 6.5 },
+    headerNum:  { docx: 18, pdf: 8   },
+    headerMain: { docx: 26, pdf: 13  },
+    headerHint: { docx: 15, pdf: 8   },
+    avisTitle:  { docx: 24, pdf: 11  },
+    avisLabel:  { docx: 18, pdf: 8.5 },
+    avisRow:    { docx: 17, pdf: 8   },
+    dataLabel:  { docx: 17, pdf: 8.5 },
+    dataValue:  { docx: 17, pdf: 8.5 },
+    sig:        { docx: 16, pdf: 8   },
+  },
+
+  // Proportions du tableau AVIS (en % de la largeur totale)
+  avisCols: [0.13, 0.18, 0.60, 0.09],  // AVIS | type | libellé | check
+
+  // Proportions tableau de données
+  dataLabelRatio: 0.36,  // 36% pour la colonne label
+};
+
+
+// ================================================================
+//  generateDocx — une seule page A4, style STYLE
+// ================================================================
+async function generateDocx(task, oldData, newData, participantsCount) {
+  const {
+    Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+    AlignmentType, BorderStyle, WidthType, ShadingType, VerticalAlign,
+  } = await import("docx");
+  const { saveAs } = await import("file-saver");
+
+  const isCancel = newData.start === "ANNULÉ";
+  const diffDate = !isCancel && (oldData.start !== newData.start);
+  const diffCab  = !isCancel && (oldData.cabinet !== newData.cabinet);
+  const diffLieu = !isCancel && (oldData.lieu !== newData.lieu);
+
+  const C = STYLE.color;
+  const SZ = STYLE.size;
+  const font = STYLE.font.docx;
+
+  // ── Helpers ─────────────────────────────────────────────
+  const BK = { style: BorderStyle.SINGLE, size: 4, color: C.border.hex };
+  const borders = { top: BK, bottom: BK, left: BK, right: BK };
+
+  const t = (text, opts = {}) => new TextRun({
+    text: String(text ?? ""),
+    bold: opts.bold ?? false,
+    size: opts.size ?? SZ.dataValue.docx,
+    font,
+    color: opts.color ?? C.text.hex,
+    italics: opts.italic ?? false,
+  });
+
+  const p = (children, align = AlignmentType.LEFT, after = 0) =>
+    new Paragraph({
+      children: Array.isArray(children) ? children : [children],
+      alignment: align,
+      spacing: { before: 0, after },
+    });
+
+  const cell = (children, opts = {}) => new TableCell({
+    children: Array.isArray(children) ? children : [p(children, opts.align || AlignmentType.LEFT)],
+    borders,
+    width: opts.w ? { size: opts.w, type: WidthType.DXA } : undefined,
+    shading: opts.fill ? { fill: opts.fill, type: ShadingType.CLEAR, color: "auto" } : undefined,
+    verticalAlign: VerticalAlign.CENTER,
+    rowSpan: opts.rowSpan,
+    margins: { top: 55, bottom: 55, left: 100, right: 100 },
+  });
+
+  const checkCell = (on, w) => cell(
+    [p([t(on ? "X" : "", { bold: true, size: 22, color: on ? C.check.hex : "DDDDDD" })], AlignmentType.CENTER)],
+    { w, fill: on ? "FDECEA" : C.white.hex }
+  );
+
+  // ── Largeurs A4 (marges 600 DXA = ~10.6mm) ──────────────
+  // A4 = 11906 DXA, 2 x 600 = 1200 → contenu = 10706
+  const TW = 10706;
+  const [c0, c1, c2, c3] = STYLE.avisCols.map(r => Math.round(TW * r));
+  // Ajuster c2 pour que la somme soit exactement TW
+  const avisCols = [c0, c1, TW - c0 - c1 - c3, c3];
+
+  const LW = Math.round(TW * STYLE.dataLabelRatio);
+  const VW = TW - LW;
+
+  // ── Tableau AVIS ─────────────────────────────────────────
+  const avisTable = new Table({
+    width: { size: TW, type: WidthType.DXA },
+    columnWidths: avisCols,
+    rows: [
+      new TableRow({ children: [
+        cell(
+          [p([t("AVIS", { bold: true, size: SZ.avisTitle.docx, color: C.white.hex })], AlignmentType.CENTER)],
+          { w: avisCols[0], rowSpan: 5, fill: C.primary.hex }
+        ),
+        cell(
+          [p([t("Annulation", { bold: true, size: SZ.avisLabel.docx, color: isCancel ? C.white.hex : "666666" })], AlignmentType.CENTER)],
+          { w: avisCols[1], fill: isCancel ? C.accent.hex : C.mid.hex }
+        ),
+        cell([], { w: avisCols[2], fill: isCancel ? C.light.hex : C.white.hex }),
+        checkCell(isCancel, avisCols[3]),
+      ]}),
+      new TableRow({ children: [
+        cell(
+          [p([t("Modification", { bold: true, size: SZ.avisLabel.docx, color: !isCancel ? C.white.hex : "666666" })], AlignmentType.CENTER)],
+          { w: avisCols[1], rowSpan: 4, fill: !isCancel ? C.accent.hex : C.mid.hex }
+        ),
+        cell([p([t("de la date de Realisation", { size: SZ.avisRow.docx })])], { w: avisCols[2] }),
+        checkCell(diffDate, avisCols[3]),
+      ]}),
+      new TableRow({ children: [
+        cell([p([t("de l'organisme de formation", { size: SZ.avisRow.docx })])], { w: avisCols[2] }),
+        checkCell(diffCab, avisCols[3]),
+      ]}),
+      new TableRow({ children: [
+        cell([p([t("du Lieu de formation", { size: SZ.avisRow.docx })])], { w: avisCols[2] }),
+        checkCell(diffLieu, avisCols[3]),
+      ]}),
+      new TableRow({ children: [
+        cell([p([t("Organisation horaire", { size: SZ.avisRow.docx })])], { w: avisCols[2] }),
+        checkCell(false, avisCols[3]),
+      ]}),
+    ],
+  });
+
+  // ── Tableau de données ────────────────────────────────────
+  const dataFields = [
+    ["Theme de l'action",         task.group],
+    ["Nature de l'action",        "Planifiee [X]   Non planifiee [ ]   Alpha [ ]"],
+    ["Effectif des participants",  String(participantsCount)],
+    ["Organisme initial",          oldData.cabinet],
+    ["Nouvel organisme",           isCancel ? "ANNULE" : newData.cabinet],
+    ["Lieu initial",               oldData.lieu],
+    ["Nouveau lieu",               isCancel ? "ANNULE" : newData.lieu],
+    ["Dates initiales",            `${oldData.start} au ${oldData.end}`],
+    ["Nouvelles dates",            isCancel ? "SESSION ANNULEE" : `${newData.start} au ${newData.end}`],
+    ["Responsable a contacter",    newData.responsable || "—"],
+  ];
+
+  const dataTable = new Table({
+    width: { size: TW, type: WidthType.DXA },
+    columnWidths: [LW, VW],
+    rows: dataFields.map(([label, value], i) => new TableRow({
+      children: [
+        cell([p([t(label, { bold: true, size: SZ.dataLabel.docx, color: C.primary.hex })])],
+          { w: LW, fill: C.light.hex }),
+        cell([p([t(value ?? "—", { size: SZ.dataValue.docx })])],
+          { w: VW, fill: i % 2 === 0 ? C.white.hex : C.rowAlt.hex }),
+      ],
+    })),
+  });
+
+  // ── Séparateur ────────────────────────────────────────────
+  const sep = (after = 60) => new Paragraph({
+    border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: C.accent.hex, space: 1 } },
+    spacing: { after },
+    children: [],
+  });
+
+  // ── Document ─────────────────────────────────────────────
+  const doc = new Document({
+    styles: { default: { document: { run: { font, size: SZ.dataValue.docx } } } },
+    sections: [{
+      properties: {
+        page: { size: { width: 11906, height: 16838 }, margin: { top: 600, right: 600, bottom: 600, left: 600 } },
+      },
+      children: [
+        // En-tête
+        p([t("Manuel de Procedures des Contrats Speciaux de Formation",
+            { size: SZ.headerSub.docx, italic: true, color: C.sub.hex })], AlignmentType.CENTER, 25),
+        p([t("Modele 3", { bold: true, size: SZ.headerNum.docx, color: C.accent.hex })], AlignmentType.CENTER, 15),
+        p([t("AVIS D'ANNULATION OU DE MODIFICATION",
+            { bold: true, size: SZ.headerMain.docx, color: C.primary.hex })], AlignmentType.CENTER, 15),
+        p([t("(sur papier a entete de l'entreprise)",
+            { size: SZ.headerHint.docx, italic: true, color: C.sub.hex })], AlignmentType.CENTER, 80),
+
+        avisTable,
+        sep(60),
+        dataTable,
+        sep(30),
+
+        // Signature
+        new Paragraph({ spacing: { before: 260, after: 0 } }),
+        p([t("Cachet de l'entreprise, Signature et qualite du responsable",
+            { size: SZ.sig.docx, italic: true, color: C.sub.hex })], AlignmentType.RIGHT, 0),
+      ],
+    }],
+  });
+
+  const blob = await Packer.toBlob(doc);
+  saveAs(blob, `Avis_Modele3_${task.group}.docx`);
+}
+
+
+// ================================================================
+//  generatePdf — même mise en page que le Word
+// ================================================================
+async function generatePdf(task, oldData, newData, participantsCount) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+  const PW = 210, ML = 10.6, MR = 10.6;
+  const CW = PW - ML - MR;   // ≈ 188.8 mm  (même ratio que Word avec marges 600 DXA)
+  let y = 10.6;
+
+  const isCancel = newData.start === "ANNULÉ";
+  const diffDate = !isCancel && (oldData.start !== newData.start);
+  const diffCab  = !isCancel && (oldData.cabinet !== newData.cabinet);
+  const diffLieu = !isCancel && (oldData.lieu !== newData.lieu);
+
+  const C  = STYLE.color;
+  const SZ = STYLE.size;
+  const fn = STYLE.font.pdf;
+
+  const sf  = (rgb) => doc.setFillColor(...rgb);
+  const sc  = (rgb) => doc.setDrawColor(...rgb);
+  const stx = (rgb) => doc.setTextColor(...rgb);
+  const b   = ()    => doc.setFont(fn, "bold");
+  const r   = ()    => doc.setFont(fn, "normal");
+  const bi  = ()    => doc.setFont(fn, "bolditalic");
+  const it  = ()    => doc.setFont(fn, "italic");
+
+  // ── En-tête ───────────────────────────────────────────────
+  // Ligne fine accent au-dessus
+  sc(C.accent.rgb); doc.setLineWidth(0.6);
+  doc.line(ML, y, ML + CW, y);
+  y += 1.5;
+
+  stx(C.sub.rgb); it(); doc.setFontSize(SZ.headerSub.pdf);
+  doc.text("Manuel de Procedures des Contrats Speciaux de Formation", PW / 2, y + 3.5, { align: "center" });
+
+  stx(C.accent.rgb); b(); doc.setFontSize(SZ.headerNum.pdf);
+  doc.text("Modele 3", PW / 2, y + 8, { align: "center" });
+
+  stx(C.primary.rgb); b(); doc.setFontSize(SZ.headerMain.pdf);
+  doc.text("AVIS D'ANNULATION OU DE MODIFICATION", PW / 2, y + 14, { align: "center" });
+
+  y += 17;
+  stx(C.sub.rgb); it(); doc.setFontSize(SZ.headerHint.pdf);
+  doc.text("(sur papier a entete de l'entreprise)", PW / 2, y, { align: "center" });
+  y += 6;
+
+  // Ligne fine accent en-dessous du titre
+  sc(C.accent.rgb); doc.setLineWidth(0.6);
+  doc.line(ML, y, ML + CW, y);
+  y += 5;
+
+  // ── Tableau AVIS ─────────────────────────────────────────
+  const RH = 7.5;
+  const [r0, r1, r2, r3] = STYLE.avisCols;
+  const aW = [CW*r0, CW*r1, CW*r2, CW*r3];
+  // ajuster aW[2] pour éviter les flottants
+  aW[2] = CW - aW[0] - aW[1] - aW[3];
+  const tableH = RH * 5;
+
+  // Fond global blanc
+  sf(C.white.rgb); doc.rect(ML, y, CW, tableH, "F");
+
+  // Col AVIS
+  sf(C.primary.rgb); doc.rect(ML, y, aW[0], tableH, "F");
+  stx(C.white.rgb); b(); doc.setFontSize(SZ.avisTitle.pdf);
+  doc.text("AVIS", ML + aW[0] / 2, y + tableH / 2 + 1.8, { align: "center" });
+
+  // Annulation (ligne 1)
+  sf(isCancel ? C.accent.rgb : C.mid.rgb);
+  doc.rect(ML + aW[0], y, aW[1], RH, "F");
+  stx(isCancel ? C.white.rgb : [100,100,100]); b(); doc.setFontSize(SZ.avisLabel.pdf);
+  doc.text("Annulation", ML + aW[0] + aW[1] / 2, y + RH * 0.65, { align: "center" });
+
+  if (isCancel) {
+    sf([253, 235, 234]); doc.rect(ML + aW[0] + aW[1] + aW[2], y, aW[3], RH, "F");
+    stx(C.check.rgb); b(); doc.setFontSize(11);
+    doc.text("X", ML + aW[0] + aW[1] + aW[2] + aW[3] / 2, y + RH * 0.68, { align: "center" });
+  }
+
+  // Modification (lignes 2-5)
+  sf(!isCancel ? C.accent.rgb : C.mid.rgb);
+  doc.rect(ML + aW[0], y + RH, aW[1], RH * 4, "F");
+  stx(!isCancel ? C.white.rgb : [100,100,100]); b(); doc.setFontSize(SZ.avisLabel.pdf);
+  doc.text("Modification", ML + aW[0] + aW[1] / 2, y + RH * 3, { align: "center" });
+
+  const avisRows = [
+    ["de la date de Realisation",    diffDate],
+    ["de l'organisme de formation",  diffCab ],
+    ["du Lieu de formation",         diffLieu],
+    ["Organisation horaire",         false   ],
+  ];
+
+  r(); doc.setFontSize(SZ.avisRow.pdf);
+  avisRows.forEach(([label, checked], i) => {
+    const ry = y + RH + i * RH;
+    if (i % 2 === 1) {
+      sf([248, 251, 255]); doc.rect(ML + aW[0] + aW[1], ry, aW[2], RH, "F");
+    }
+    stx(C.text.rgb); r(); doc.setFontSize(SZ.avisRow.pdf);
+    doc.text(label, ML + aW[0] + aW[1] + 2.5, ry + RH * 0.68);
+    if (checked) {
+      sf([253, 235, 234]); doc.rect(ML + aW[0] + aW[1] + aW[2], ry, aW[3], RH, "F");
+      stx(C.check.rgb); b(); doc.setFontSize(11);
+      doc.text("X", ML + aW[0] + aW[1] + aW[2] + aW[3] / 2, ry + RH * 0.68, { align: "center" });
+      r(); doc.setFontSize(SZ.avisRow.pdf);
+    }
+  });
+
+  // Grille
+  sc(C.border.rgb); doc.setLineWidth(0.25);
+  doc.rect(ML, y, CW, tableH);
+  doc.line(ML + aW[0], y, ML + aW[0], y + tableH);
+  doc.line(ML + aW[0] + aW[1], y, ML + aW[0] + aW[1], y + tableH);
+  doc.line(ML + aW[0] + aW[1] + aW[2], y, ML + aW[0] + aW[1] + aW[2], y + tableH);
+  for (let i = 1; i < 5; i++) doc.line(ML + aW[0], y + i * RH, ML + CW, y + i * RH);
+
+  y += tableH + 4;
+
+  // Ligne séparatrice
+  sc(C.accent.rgb); doc.setLineWidth(0.6);
+  doc.line(ML, y, ML + CW, y);
+  y += 4;
+
+  // ── Tableau de données ────────────────────────────────────
+  const LW = CW * STYLE.dataLabelRatio;
+  const VW = CW - LW;
+  const LINE_H = 4.2;
+  const PAD_V  = 1.8;
+  const MIN_RH = 7;
+
+  const dataFields = [
+    ["Theme de l'action",         task.group],
+    ["Nature de l'action",        "Planifiee [X]   Non planifiee [ ]   Alpha [ ]"],
+    ["Effectif des participants",  String(participantsCount)],
+    ["Organisme initial",          oldData.cabinet],
+    ["Nouvel organisme",           isCancel ? "ANNULE" : newData.cabinet],
+    ["Lieu initial",               oldData.lieu],
+    ["Nouveau lieu",               isCancel ? "ANNULE" : newData.lieu],
+    ["Dates initiales",            `${oldData.start} au ${oldData.end}`],
+    ["Nouvelles dates",            isCancel ? "SESSION ANNULEE" : `${newData.start} au ${newData.end}`],
+    ["Responsable a contacter",    newData.responsable || "—"],
+  ];
+
+  doc.setFontSize(SZ.dataValue.pdf);
+  dataFields.forEach(([label, value], i) => {
+    // Hauteur dynamique selon le contenu de la valeur
+    const val   = String(value || "—");
+    const lines = doc.splitTextToSize(val, VW - 5);
+    const rh    = Math.max(MIN_RH, lines.length * LINE_H + PAD_V * 2);
+
+    // Fonds
+    sf(C.light.rgb); doc.rect(ML, y, LW, rh, "F");
+    sf(i % 2 === 0 ? C.white.rgb : C.rowAlt.rgb); doc.rect(ML + LW, y, VW, rh, "F");
+
+    // Label
+    stx(C.primary.rgb); b(); doc.setFontSize(SZ.dataLabel.pdf);
+    doc.text(label, ML + 2.5, y + rh / 2 + 1.4);
+
+    // Valeur (multi-lignes centrées verticalement)
+    stx(C.text.rgb); r(); doc.setFontSize(SZ.dataValue.pdf);
+    const textY = y + (rh - lines.length * LINE_H) / 2 + LINE_H - 0.5;
+    doc.text(lines, ML + LW + 2.5, textY);
+
+    // Bordure
+    sc(C.border.rgb); doc.setLineWidth(0.2);
+    doc.rect(ML, y, CW, rh);
+    doc.line(ML + LW, y, ML + LW, y + rh);
+
+    y += rh;
+  });
+
+  y += 4;
+
+  // Ligne séparatrice
+  sc(C.accent.rgb); doc.setLineWidth(0.6);
+  doc.line(ML, y, ML + CW, y);
+  y += 4;
+
+  // ── Zone signature ─────────────────────────────────────────
+  // Hauteur fixe, positionnée dynamiquement (au moins 15mm avant bas de page)
+  const sigH = 14;
+  const sigY = Math.max(y, 297 - ML - sigH - 2);
+
+  sf(C.light.rgb); doc.rect(ML, sigY, CW, sigH, "F");
+  sc(C.border.rgb); doc.setLineWidth(0.25); doc.rect(ML, sigY, CW, sigH);
+
+  stx(C.sub.rgb); it(); doc.setFontSize(SZ.sig.pdf);
+  doc.text(
+    "Cachet de l'entreprise, Signature et qualite du responsable",
+    ML + CW - 2.5, sigY + sigH / 2 + 1.5, { align: "right" }
+  );
+
+  doc.save(`Avis_Modele3_${task.group}.pdf`);
+}
+// ─── Composant Modal ─────────────────────────────────────────────────────────
+
+ function AvisModificationModal({
+  task              = { group: "Sécurité au travail" },
+  oldData           = { start: "10/04/2025", end: "12/04/2025", cabinet: "Cabinet Alpha Formation", lieu: "Salle A — Casablanca" },
+  newData           = { start: "24/04/2025", end: "26/04/2025", cabinet: "Institut Beta Formation", lieu: "Centre B — Rabat", responsable: "M. Dupont — 06 00 00 00 00" },
+  participantsCount = 12,
+  onClose           = () => {},
+}) {
+
+   const isCancellation = newData?.start === "ANNULÉ" || newData?.start === "";
+
+  // On ne calcule les différences QUE si ce n'est PAS une annulation
+  const diffDate    = !isCancellation && (oldData.start !== newData.start || oldData.end !== newData.end);
+  const diffCabinet = !isCancellation && (oldData.cabinet !== newData.cabinet);
+  const diffLieu    = !isCancellation && (oldData.lieu !== newData.lieu);
+
+
+  // ── Styles ─────────────────────────────────────────────────────────────────
+  const s = {
+    overlay: {
+      position: "fixed", inset: 0, zIndex: 3000,
+      background: "rgba(0,0,0,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "24px 16px",
+    },
+    modal: {
+      background: "#fff", borderRadius: "12px",
+      border: "0.5px solid #e0e0e0",
+      width: "100%", maxWidth: "700px",
+      maxHeight: "92vh", overflowY: "auto",
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      color: "#1a1a1a",
+    },
+    header: {
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "14px 20px", borderBottom: "0.5px solid #e8e8e8",
+      position: "sticky", top: 0, background: "#fff", zIndex: 10,
+      borderRadius: "12px 12px 0 0",
+    },
+    iconBox: {
+      width: "28px", height: "28px", borderRadius: "6px",
+      background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center",
+    },
+    actions: { display: "flex", gap: "8px" },
+    btnW: { fontSize: "13px", padding: "5px 12px", borderRadius: "6px", cursor: "pointer", background: "#e8f4fd", color: "#1565c0", border: "0.5px solid #bbdefb", fontWeight: 500 },
+    btnP: { fontSize: "13px", padding: "5px 12px", borderRadius: "6px", cursor: "pointer", background: "#fce8e8", color: "#c62828", border: "0.5px solid #ffcdd2", fontWeight: 500 },
+    btnC: { fontSize: "13px", padding: "5px 12px", borderRadius: "6px", cursor: "pointer", background: "#f5f5f5", color: "#555", border: "0.5px solid #e0e0e0" },
+    body:    { padding: "24px 28px" },
+    section: { border: "0.5px solid #e8e8e8", borderRadius: "10px", overflow: "hidden", marginBottom: "14px" },
+    sHead:   { background: "#fafafa", padding: "8px 16px", borderBottom: "0.5px solid #e8e8e8", fontSize: "11px", fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em" },
+    gRow:  (last) => ({ display: "grid", gridTemplateColumns: "155px 1fr", borderBottom: last ? "none" : "0.5px solid #e8e8e8" }),
+    gKey:    { padding: "9px 16px", fontSize: "13px", color: "#888", borderRight: "0.5px solid #e8e8e8" },
+    gVal:    { padding: "9px 16px", fontSize: "13px", fontWeight: 500 },
+    pill: (a) => ({ fontSize: "12px", padding: "3px 10px", borderRadius: "999px", background: a ? "#e8f4fd" : "#f5f5f5", color: a ? "#1565c0" : "#aaa", border: a ? "0.5px solid #bbdefb" : "0.5px solid #e0e0e0", fontWeight: a ? 500 : 400 }),
+    cRow: (last) => ({ display: "flex", alignItems: "center", gap: "10px", padding: "9px 16px", borderBottom: last ? "none" : "0.5px solid #e8e8e8" }),
+    rRow:  { display: "grid", gridTemplateColumns: "1fr 1fr" },
+    rCell: (a) => ({ display: "flex", alignItems: "center", gap: "9px", padding: "11px 16px", cursor: "pointer", borderRight: a ? "none" : "0.5px solid #e8e8e8", background: a ? "#f0f7ff" : "transparent" }),
+    dGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" },
+    dCard: (n) => ({ border: n ? "0.5px solid #bbdefb" : "0.5px solid #e8e8e8", borderRadius: "10px", overflow: "hidden" }),
+    dHead: (n) => ({ background: n ? "#e8f4fd" : "#fafafa", padding: "8px 14px", borderBottom: n ? "0.5px solid #bbdefb" : "0.5px solid #e8e8e8", fontSize: "11px", fontWeight: 500, color: n ? "#1565c0" : "#999", textTransform: "uppercase", letterSpacing: "0.06em" }),
+    dBody: { padding: "12px 14px" },
+    fl:   { fontSize: "11px", color: "#aaa", margin: "0 0 2px" },
+    fv: (l) => ({ fontSize: "13px", fontWeight: 500, margin: l ? 0 : "0 0 9px", wordBreak: "break-word" }),
+    sigRow: { border: "0.5px solid #e8e8e8", borderRadius: "10px", padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" },
+  };
+
+  const CheckBox = ({ checked }) => (
+    <div style={{
+      width: "16px", height: "16px", borderRadius: "4px", flexShrink: 0,
+      background: checked ? "#1565c0" : "#fff",
+      border: checked ? "none" : "1.5px solid #ccc",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {checked && (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M2 5l2.5 2.5L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={s.overlay}>
+      <div style={s.modal}>
+
+        {/* ── Header ── */}
+        <div style={s.header}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={s.iconBox}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="1.5" stroke="#888" strokeWidth="1.2" fill="none"/>
+                <path d="M5 6h6M5 8.5h6M5 11h4" stroke="#888" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+            </div>
+            <span style={{ fontSize: "14px", fontWeight: 500 }}>Avis de modification — Modèle 3</span>
+          </div>
+          <div style={s.actions}>
+            <button style={s.btnW} onClick={() => generateDocx(task, oldData, newData, participantsCount)}>⬇ Word (.docx)</button>
+            <button style={s.btnP} onClick={() => generatePdf(task, oldData, newData, participantsCount)}>⬇ PDF</button>
+            <button style={s.btnC} onClick={onClose}>Fermer</button>
+          </div>
+        </div>
+
+        <div style={s.body}>
+
+          {/* En-tête document */}
+          <div style={{ textAlign: "center", marginBottom: "20px" }}>
+            <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 3px" }}>Manuel de Procédures des Contrats Spéciaux de Formation</p>
+            <h2 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 3px", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+              Avis d'annulation ou de modification
+            </h2>
+            <p style={{ fontSize: "12px", color: "#aaa", margin: 0 }}>Sur papier à entête de l'entreprise</p>
+          </div>
+
+          {/* Type d'avis */}
+          <div style={s.section}>
+  <div style={s.sHead}>Type d'avis</div>
+  <div style={s.rRow}>
+    {/* Cellule Annulation : active si isCancellation est vrai */}
+    <div style={s.rCell(isCancellation)}>
+      <input type="radio" checked={isCancellation} readOnly style={{ accentColor: "#c62828" }}/>
+      <span style={{ fontSize: "13px", fontWeight: isCancellation ? 700 : 500, color: isCancellation ? "#c62828" : "#333" }}>
+        Annulation
+      </span>
+    </div>
+    {/* Cellule Modification : active si isCancellation est faux */}
+    <div style={s.rCell(!isCancellation)}>
+      <input type="radio" checked={!isCancellation} readOnly style={{ accentColor: "#1565c0" }}/>
+      <span style={{ fontSize: "13px", fontWeight: !isCancellation ? 700 : 500, color: !isCancellation ? "#1565c0" : "#333" }}>
+        Modification
+      </span>
+    </div>
+  </div>
+</div>
+
+          {/* Objet */}
+           <div style={s.section}>
+            <div style={s.sHead}>Objet de la modification</div>
+            {[
+              ["Date de réalisation",    diffDate],
+              ["Organisme de formation", diffCabinet],
+              ["Lieu de formation",      diffLieu],
+            ].map(([label, checked], i, arr) => (
+              <div key={label} style={s.cRow(i === arr.length - 1)}>
+                <div style={{
+                  width: "16px", height: "16px", borderRadius: "4px",
+                  background: checked ? "#1565c0" : "#fff",
+                  border: checked ? "none" : "1.5px solid #ccc",
+                  display: "flex", alignItems: "center", justifyContent: "center"
+                }}>
+                  {checked && <Check size={10} color="#fff" />}
+                </div>
+                <span style={{ fontSize: "13px", color: checked ? "#1565c0" : "#333", fontWeight: checked ? 600 : 400 }}>{label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Infos générales */}
+          <div style={s.section}>
+            <div style={s.sHead}>Informations générales</div>
+            <div style={s.gRow(false)}>
+              <div style={s.gKey}>Thème de l'action</div>
+              <div style={s.gVal}>{task.group || "—"}</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "155px 1fr", borderBottom: "0.5px solid #e8e8e8" }}>
+              <div style={s.gKey}>Nature de l'action</div>
+              <div style={{ padding: "9px 16px", display: "flex", gap: "7px", flexWrap: "wrap" }}>
+                <span style={s.pill(true)}>Planifiée</span>
+                <span style={s.pill(false)}>Non planifiée</span>
+                <span style={s.pill(false)}>Alpha</span>
+              </div>
+            </div>
+            <div style={s.gRow(true)}>
+              <div style={s.gKey}>Effectif participants</div>
+              <div style={s.gVal}>{participantsCount}</div>
+            </div>
+          </div>
+
+          {/* Avant / Après */}
+          <div style={s.dGrid}>
+            {[
+              { label: "Avant", data: oldData, isNew: false },
+              { label: "Après", data: newData, isNew: true },
+            ].map(({ label, data, isNew }) => (
+              <div key={label} style={s.dCard(isNew)}>
+                <div style={s.dHead(isNew)}>{label}</div>
+                <div style={s.dBody}>
+                  <p style={s.fl}>Organisme</p>
+                  <p style={s.fv(false)}>{data.cabinet || "—"}</p>
+                  <p style={s.fl}>Lieu</p>
+                  <p style={s.fv(false)}>{data.lieu || "—"}</p>
+                  <p style={s.fl}>Dates</p>
+                  <p style={s.fv(true)}>{data.start || "—"} → {data.end || "—"}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Responsable / Signature */}
+          <div style={s.sigRow}>
+            <div>
+              <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 2px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Responsable à contacter</p>
+              <p style={{ fontSize: "13px", fontWeight: 500, margin: 0 }}>{newData.responsable || "—"}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Cachet & Signature</p>
+              <div style={{ width: "88px", height: "40px", border: "0.5px dashed #ccc", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: "11px", color: "#ccc" }}>Ici</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTypesMap, onClose, onEdit, onPrint, wsId, showToast, setCandidats }) {
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [cabinet, setCabinet] = useState("");
   const [lieu,    setLieu]    = useState("");
   const [cout,    setCout]    = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  const [showAvisModal, setShowAvisModal] = useState(false);
+const [history, setHistory] = useState({ old: {}, current: {} });
 
   if (!task) return null;
 
@@ -3571,38 +4254,93 @@ function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTy
     String(c.groupe || "1") === String(task.groupe || "1")
   );
 
-  useEffect(() => {
-    if (groupCandidats.length > 0) {
-      const first = groupCandidats[0];
-      setCabinet(first.cabinet || first.extraData?.cabinet || "");
-      setLieu(first.lieu    || first.extraData?.lieu    || "");
-      setCout(first.cout    || first.extraData?.cout    || "");
-    }
-  }, [task.id, groupCandidats.length]);
+  // Dans TaskDrawer
+useEffect(() => {
+  if (groupCandidats.length > 0) {
+    const first = groupCandidats[0];
+    const isCancelled = groupCandidats.every(c => c.statut === "Annulé"); // Détection
+
+    const initialData = {
+      cabinet: first.cabinet || first.extraData?.cabinet || "",
+      lieu: first.lieu || first.extraData?.lieu || "",
+      cout: first.cout || first.extraData?.cout || "",
+      start: isCancelled ? "ANNULÉ" : task.start, // Fixer ici
+      end: isCancelled ? "ANNULÉ" : task.end
+    };
+    
+    setCabinet(first.cabinet || first.extraData?.cabinet || "");
+    setLieu(first.lieu || first.extraData?.lieu || "");
+    setCout(first.cout || first.extraData?.cout || "");
+    
+    setHistory({
+      old: { 
+        cabinet: first.cabinet || first.extraData?.cabinet || "", 
+        lieu: first.lieu || first.extraData?.lieu || "", 
+        start: task.start, 
+        end: task.end 
+      },
+      current: initialData
+    });
+  }
+}, [task.id, groupCandidats.length]);
 
   const handleSaveInfo = async () => {
-    setIsSaving(true);
-    const coutPourServeur = cout.replace(/\./g, "").replace(",", ".");
-    try {
-      await apiFetch(`/workspaces/${wsId}/gantt/group-extras`, {
-        method: "PATCH",
-        body: { theme: task.group, groupe: String(task.groupe), cabinet, lieu, cout: coutPourServeur },
-      });
-      if (setCandidats) {
-        setCandidats(prev => prev.map(c =>
-          c.theme === task.group && String(c.groupe) === String(task.groupe)
-            ? { ...c, cabinet, lieu, cout, extraData: { ...c.extraData, cabinet, lieu, cout } }
-            : c
-        ));
-      }
-      setIsEditingInfo(false);
-      showToast("Informations mises à jour", "success");
-    } catch (err) {
-      showToast("Erreur de sauvegarde : " + err.message, "error");
-    } finally {
-      setIsSaving(false);
-    }
+  setIsSaving(true);
+
+  // 1. Préparer le format du coût
+  const coutPourServeur = cout.replace(/\s/g, "").replace(",", ".");
+
+  // 2. DÉFINITION DE newData (C'est ici que l'erreur se produit si cette ligne manque)
+  const newData = {
+    cabinet: cabinet,
+    lieu: lieu,
+    cout: coutPourServeur,
+    start: task.start,
+    end: task.end
   };
+
+  try {
+    // 3. Appel API avec newData
+    await apiFetch(`/workspaces/${wsId}/gantt/group-extras`, {
+      method: "PATCH",
+      body: { 
+        theme: task.group, 
+        groupe: String(task.groupe), 
+        ...newData // On envoie les nouvelles infos
+      },
+    });
+
+    // 4. Mise à jour de l'état local pour l'affichage immédiat
+    if (setCandidats) {
+      setCandidats(prev => prev.map(c =>
+        (c.theme === task.group && String(c.groupe) === String(task.groupe))
+          ? { 
+              ...c, 
+              cabinet: newData.cabinet, 
+              lieu: newData.lieu, 
+              cout: newData.cout,
+              extraData: { ...c.extraData, cabinet: newData.cabinet, lieu: newData.lieu, cout: newData.cout } 
+            }
+          : c
+      ));
+    }
+
+    // 5. Enregistrer dans l'historique pour le document de modification
+    setHistory(h => ({ ...h, current: newData }));
+
+    setIsEditingInfo(false);
+    showToast("Informations mises à jour", "success");
+
+    // 6. Afficher le modal d'impression Modèle 3
+    setTimeout(() => setShowAvisModal(true), 500);
+
+  } catch (err) {
+    console.error(err);
+    showToast("Erreur de sauvegarde : " + err.message, "error");
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   const formatCoutFR = (val) => {
     if (val === undefined || val === null || val === "") return "";
@@ -3647,6 +4385,60 @@ function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTy
     border: "1px solid #e3e3e2", borderRadius: 5,
     outline: "none", fontFamily: "inherit", color: "#37352f", background: "#fff",
   };
+
+  const handleCancelGroup = async () => {
+  if (!window.confirm(`Voulez-vous vraiment annuler la formation "${task.group}" pour le groupe ${task.groupe} ?`)) return;
+
+  setIsSaving(true);
+  try {
+    // 1. Appel API au backend (on va créer cette route juste après)
+    await apiFetch(`/workspaces/${wsId}/gantt/group-cancel`, {
+      method: "PATCH",
+      body: { 
+        theme: task.group, 
+        groupe: String(task.groupe) 
+      },
+    });
+
+    // 2. Mise à jour locale des candidats (Statut -> Annulé)
+    if (setCandidats) {
+      setCandidats(prev => prev.map(c =>
+        (c.theme === task.group && String(c.groupe) === String(task.groupe))
+          ? { ...c, statut: "Annulé" }
+          : c
+      ));
+    }
+
+    // 3. Préparer l'historique pour le document Modèle 3
+    const cancelData = {
+      cabinet: cabinet,
+      lieu: lieu,
+      start: task.start,
+      end: task.end,
+      isCancellation: true // On ajoute ce flag pour le document
+    };
+    
+    setHistory({
+    old: { cabinet, lieu, start: task.start, end: task.end },
+    current: { cabinet, lieu, start: "ANNULÉ", end: "ANNULÉ" } // C'est ce texte qui déclenche le mode annulation
+  });
+  setShowAvisModal(true);
+
+    showToast("Formation annulée avec succès", "success");
+
+    // 4. Ouvrir la modal de téléchargement du document
+    setTimeout(() => setShowAvisModal(true), 500);
+
+  } catch (err) {
+    console.error(err);
+    showToast("Erreur lors de l'annulation : " + err.message, "error");
+  } finally {
+    setIsSaving(false);
+  }
+};
+
+const isActuallyCancelled = groupCandidats.length > 0 && groupCandidats.every(c => c.statut === "Annulé");
+
 
   return (
     <>
@@ -3716,7 +4508,7 @@ function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTy
             ) : (
               <div style={{ display:"flex", gap:5 }}>
                 <button onClick={handleSaveInfo} disabled={isSaving} style={{ height:22, padding:"0 8px", background:"#0f7ddb", border:"none", borderRadius:4, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", gap:4, fontSize:11, fontWeight:500 }}>
-                  {isSaving ? <Loader2 size={11} className="spin"/> : <Check size={11}/>}
+                  {isSaving ? <Spinner size={12} color="#fff" />  : <Check size={11}/>}
                   {!isSaving && "Sauver"}
                 </button>
                 <button onClick={()=>setIsEditingInfo(false)} style={{ height:22, padding:"0 8px", background:"#f0f0ee", border:"none", borderRadius:4, cursor:"pointer", fontSize:11, color:"#6b6b6b" }}>
@@ -3824,43 +4616,122 @@ function TaskDrawer({ task, candidats, metaCache, candidatCountByKey, conflictTy
         </div>
 
         {/* ── Footer ── */}
-        <div style={{ padding:"12px 20px", borderTop:"1px solid #f0f0ee", flexShrink:0, display:"flex", gap:8 }}>
-          <button onClick={()=>onPrint(task)} style={{ flex:1, padding:"9px 0", fontSize:13, fontWeight:500, color:"#37352f", background:"#fff", border:"1px solid #e3e3e2", borderRadius:6, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-            onMouseEnter={e=>e.currentTarget.style.background="#f7f7f5"}
-            onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-            <Printer size={13}/> Émargement
-          </button>
-          <button onClick={()=>{ onEdit(task); onClose(); }} style={{ flex:1, padding:"9px 0", fontSize:13, fontWeight:500, color:"#fff", background:"#37352f", border:"none", borderRadius:6, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-            onMouseEnter={e=>e.currentTarget.style.background="#111"}
-            onMouseLeave={e=>e.currentTarget.style.background="#37352f"}>
-            <Edit2 size={13}/> Paramètres Gantt
-          </button>
-        </div>
+        <div style={{ 
+  padding: "16px 20px", 
+  borderTop: "1px solid #f0f0ee", 
+  flexShrink: 0, 
+  display: "grid", 
+  gridTemplateColumns: "1fr 1fr 1.2fr", // Alignement propre sur une ligne
+  gap: 8,
+  background: "#fff"
+}}>
+  {/* BOUTON ÉMARGEMENT */}
+  <button 
+    onClick={() => onPrint(task)} 
+    style={{ 
+      height: 38, border: "1px solid #e3e3e2", background: "#fff", 
+      borderRadius: 8, cursor: "pointer", display: "flex", 
+      alignItems: "center", justifyContent: "center", gap: 6,
+      fontSize: "12px", fontWeight: 600, color: "#37352f"
+    }}
+    onMouseEnter={e => e.currentTarget.style.background = "#f7f7f5"}
+    onMouseLeave={e => e.currentTarget.style.background = "#fff"}
+  >
+    <Printer size={14}/> Émargement
+  </button>
+
+  {/* BOUTON ANNULER (DYNAMIQUE) */}
+  <button 
+    onClick={!isActuallyCancelled ? handleCancelGroup : () => setShowAvisModal(true)} 
+    disabled={isSaving}
+    style={{ 
+      height: 38, 
+      border: isActuallyCancelled ? "1px solid #e3e3e2" : "1px solid #ffcfcf", 
+      background: isActuallyCancelled ? "#f7f7f5" : "#fff5f5", 
+      borderRadius: 8, cursor: "pointer", display: "flex", 
+      alignItems: "center", justifyContent: "center", gap: 6,
+      fontSize: "12px", fontWeight: 700, 
+      color: isActuallyCancelled ? "#9b9a97" : "#d44c47",
+      transition: "all 0.2s"
+    }}
+  >
+    {isActuallyCancelled ? (
+      <>
+        <Check size={14} color="#448361"/> 
+        <span>Annulée (Doc)</span>
+      </>
+    ) : (
+      <>
+        <X size={14}/> 
+        <span>Annuler</span>
+      </>
+    )}
+  </button>
+
+  {/* BOUTON PARAMÈTRES */}
+  <button 
+    onClick={() => { onEdit(task); onClose(); }} 
+    style={{ 
+      height: 38, border: "none", background: "#37352f", 
+      borderRadius: 8, cursor: "pointer", display: "flex", 
+      alignItems: "center", justifyContent: "center", gap: 6,
+      fontSize: "12px", fontWeight: 600, color: "#fff"
+    }}
+    onMouseEnter={e => e.currentTarget.style.background = "#222"}
+    onMouseLeave={e => e.currentTarget.style.background = "#37352f"}
+  >
+    <Edit2 size={14}/> Gantt
+  </button>
+</div>
 
       </div>
+      {showAvisModal && (
+      <AvisModificationModal 
+        task={task}
+        oldData={history.old}
+        newData={history.current}
+        participantsCount={groupCandidats.length}
+        onClose={() => setShowAvisModal(false)}
+      />
+    )}
     </>
   );
 }
 
 
-// ═══════════════════════════════════════════════════════════════
-// GANTT VIEW
-// ═══════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════
-// CALENDAR VIEW — À placer JUSTE AVANT function GanttView
-// ═══════════════════════════════════════════════════════════════
-function CalendarView({ displayTasksFiltered, metaCache, candidatCountByKey, conflictTypesMap, liveConflictTaskKeys, wd, sh, vacs, onEditTask, candidats ,ws,windowW = 1200  }) {
+function CalendarView({ 
+  displayTasksFiltered, metaCache, candidatCountByKey, conflictTypesMap, 
+  liveConflictTaskKeys, wd, sh, vacs, onEditTask, candidats, ws, windowW = 1200  
+}) {
   const today = new Date();
   const [viewYear,  setViewYear]  = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [hovered,   setHovered]   = useState(null);
   const [expandedDay, setExpandedDay] = useState(null);
-const [selectedTask, setSelectedTask] = useState(null);
- const [printDoc, setPrintDoc] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [printDoc, setPrintDoc] = useState(null);
 
   const prevMonth = () => { if (viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1); };
   const nextMonth = () => { if (viewMonth===11){setViewYear(y=>y+1);setViewMonth(0);}else setViewMonth(m=>m+1); };
   const goToday   = () => { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); };
+
+  // --- LOGIQUE DÉTECTION ANNULATION ---
+  const cancelledKeys = useMemo(() => {
+    const map = {};
+    candidats.forEach(c => {
+      const k = `${(c.theme || "").trim()}||${String(c.groupe || "1")}`;
+      if (!map[k]) map[k] = [];
+      map[k].push(c.statut);
+    });
+    
+    const cancelled = new Set();
+    Object.entries(map).forEach(([key, statuses]) => {
+      if (statuses.length > 0 && statuses.every(s => s === "Annulé")) {
+        cancelled.add(key);
+      }
+    });
+    return cancelled;
+  }, [candidats]);
 
   const { weeks, firstDay, lastDay } = useMemo(() => {
     const first = new Date(viewYear, viewMonth, 1);
@@ -3929,8 +4800,8 @@ const [selectedTask, setSelectedTask] = useState(null);
           ws={ws}
         />
       )}
-      {/* Drawer */}
-    {selectedTask && (
+      
+      {selectedTask && (
         <TaskDrawer
           task={selectedTask}
           candidats={candidats}
@@ -3939,9 +4810,7 @@ const [selectedTask, setSelectedTask] = useState(null);
           conflictTypesMap={conflictTypesMap}
           onClose={() => setSelectedTask(null)}
           onEdit={onEditTask}
-          // Ajoutez la fonction onPrint ici :
           onPrint={(t) => {
-            // On crée un objet "doc" virtuel pour le designer
             setPrintDoc({
               nom: `Liste d'émargement - ${t.group} - G${t.groupe}`,
               type: "Émargement"
@@ -3949,6 +4818,7 @@ const [selectedTask, setSelectedTask] = useState(null);
           }}
         />
       )}
+
       {/* Navigation */}
       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
         <button onClick={prevMonth} style={{ width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",border:`1px solid ${T.pageBdr}`,borderRadius:4,background:"#fff",cursor:"pointer",color:T.pageSub }}>
@@ -3970,7 +4840,6 @@ const [selectedTask, setSelectedTask] = useState(null);
 
       {/* Grille */}
       <div style={{ border:`1px solid ${T.pageBdr}`,borderRadius:6,overflow:"hidden",background:"#fff" }}>
-        {/* En-têtes */}
         <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",borderBottom:`1px solid ${T.pageBdr}`,background:"#f7f7f7" }}>
           {DOW_LABELS.map((d,i) => (
             <div key={d} style={{ padding:"8px 0",textAlign:"center",fontSize:11,fontWeight:600,color:i>=5?"rgba(212,76,71,0.45)":T.pageTer,textTransform:"uppercase",letterSpacing:"0.06em" }}>
@@ -3979,7 +4848,6 @@ const [selectedTask, setSelectedTask] = useState(null);
           ))}
         </div>
 
-        {/* Semaines */}
         {weeks.map((week, wi) => (
           <div key={wi} style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",borderBottom:wi<weeks.length-1?`1px solid ${T.pageBdr}`:"none" }}>
             {week.map(({ date, cur }, di) => {
@@ -4001,7 +4869,6 @@ const [selectedTask, setSelectedTask] = useState(null);
 
               return (
                 <div key={di} style={{ minHeight: windowW < 480 ? 60 : windowW < 768 ? 80 : 115,padding: windowW < 768 ? "3px 2px 2px" : "5px 4px 4px",background:cellBg,borderRight:di<6?`1px solid ${T.pageBdr}`:"none",position:"relative" }}>
-                  {/* Numéro */}
                   <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3,paddingRight:2 }}>
                     <span style={{ width:22,height:22,display:"inline-flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",fontSize:12,fontWeight:isToday?700:400,background:isToday?"#37352f":"transparent",color:isToday?"#fff":!cur?T.pageTer:isWE?"rgba(212,76,71,0.35)":T.pageText,flexShrink:0 }}>
                       {date.getDate()}
@@ -4014,56 +4881,71 @@ const [selectedTask, setSelectedTask] = useState(null);
                   </div>
 
                   {/* Formations */}
-<div style={{ display:"flex",flexDirection:"column",gap:2 }}>
-  {(expandedDay === ds ? tasks_ : shown).map(({ task, isStart, key }, ti) => {
-    const pal       = grpTag(task.group);
-    const isHov     = hovered === key;
-    const cfColor   = getConflictColor(key);
-    const isConf    = liveConflictTaskKeys.has(key);
-    const count     = candidatCountByKey[key] || 0;
-    const meta      = metaCache[task.id] || { prog:{ pct:0 } };
-    const isHD      = task.halfDay;
-    const slotLabel = isHD ? (task.slot==="après-midi"?"PM":"AM") : null;
+                  <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
+                    {(expandedDay === ds ? tasks_ : shown).map(({ task, isStart, key }, ti) => {
+                      const pal         = grpTag(task.group);
+                      const isHov       = hovered === key;
+                      const isCancelled = cancelledKeys.has(key);
+                      const cfColor     = getConflictColor(key);
+                      const isConf      = liveConflictTaskKeys.has(key) && !isCancelled;
+                      const count       = candidatCountByKey[key] || 0;
+                      const meta        = metaCache[task.id] || { prog:{ pct:0 } };
+                      const isHD        = task.halfDay;
+                      const slotLabel   = isHD ? (task.slot==="après-midi"?"PM":"AM") : null;
 
-    return (
-      <div key={ti}
-        onMouseEnter={() => setHovered(key)}
-        onMouseLeave={() => setHovered(null)}
-        onClick={() => setSelectedTask(task)}
-        title={`${task.group} — G${task.groupe}${count?` · ${count} cand.`:""}${meta.prog.pct?` · ${meta.prog.pct}%`:""}`}
-        style={{ borderRadius:3,padding:"2px 5px",fontSize:10,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:3,overflow:"hidden",background:isConf?(cfColor+"18"):isHov?`${pal.text}1a`:pal.bg,border:`1px solid ${isConf?cfColor:isHov?pal.text:(pal.bd||"transparent")}`,color:isConf?cfColor:pal.text,transition:"all 0.08s",position:"relative" }}>
-        <div style={{ width:5,height:5,borderRadius:"50%",background:isConf?cfColor:pal.text,flexShrink:0,opacity:isStart?1:0.3 }} />
-        <span style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1 }}>
-          {task.group.length>15?task.group.slice(0,14)+"…":task.group}
-          {task.groupe ? <span style={{ opacity:0.7 }}> G{task.groupe}</span> : ""}
-        </span>
-        {slotLabel && <span style={{ fontSize:8,fontWeight:700,opacity:0.8,flexShrink:0 }}>{slotLabel}</span>}
-        {count>0 && isStart && <span style={{ fontSize:9,opacity:0.6,flexShrink:0 }}>{count}</span>}
-        {meta.prog.pct>0 && (
-          <div style={{ position:"absolute",bottom:0,left:0,height:2,width:`${meta.prog.pct}%`,background:isConf?cfColor:pal.text,opacity:0.35,borderRadius:"0 0 0 3px" }} />
-        )}
-      </div>
-    );
-  })}
+                      // --- STYLE CONDITIONNEL ---
+                      const background = isCancelled ? "#f5f5f5" : (isConf ? (cfColor+"18") : (isHov ? `${pal.text}1a` : pal.bg));
+                      const border     = isCancelled ? "1px dashed #ccc" : `1px solid ${isConf ? cfColor : (isHov ? pal.text : (pal.bd||"transparent"))}`;
+                      const color      = isCancelled ? "#bbb" : (isConf ? cfColor : pal.text);
+                      const opacity    = isCancelled ? 0.6 : 1;
 
-  {/* Bouton +X autres / Réduire */}
-  {more > 0 && expandedDay !== ds && (
-    <div
-      onClick={e => { e.stopPropagation(); setExpandedDay(ds); }}
-      style={{ fontSize:9,color:T.accent,paddingLeft:6,fontStyle:"italic",cursor:"pointer",fontWeight:600 }}
-    >
-      +{more} autre{more>1?"s":""}
-    </div>
-  )}
-  {expandedDay === ds && tasks_.length > 4 && (
-    <div
-      onClick={e => { e.stopPropagation(); setExpandedDay(null); }}
-      style={{ fontSize:9,color:T.pageSub,paddingLeft:6,fontStyle:"italic",cursor:"pointer" }}
-    >
-      ▲ Réduire
-    </div>
-  )}
-</div>
+                      return (
+                        <div key={ti}
+                          onMouseEnter={() => setHovered(key)}
+                          onMouseLeave={() => setHovered(null)}
+                          onClick={() => setSelectedTask(task)}
+                          title={isCancelled ? `${task.group} (ANNULÉ)` : `${task.group} — G${task.groupe}${count?` · ${count} cand.`:""}`}
+                          style={{ 
+                            borderRadius:3, padding:"2px 5px", fontSize:10, fontWeight:500, 
+                            cursor:"pointer", display:"flex", alignItems:"center", gap:3, 
+                            overflow:"hidden", transition:"all 0.08s", position:"relative",
+                            background, border, color, opacity
+                          }}>
+                          
+                          <div style={{ 
+                            width:5, height:5, borderRadius:"50%", 
+                            background: isCancelled ? "#bbb" : (isConf ? cfColor : pal.text), 
+                            flexShrink:0, opacity: isStart ? 1 : 0.3 
+                          }} />
+                          
+                          <span style={{ 
+                            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1,
+                            textDecoration: isCancelled ? "line-through" : "none" 
+                          }}>
+                            {task.group.length > 15 ? task.group.slice(0,14)+"…" : task.group}
+                            {task.groupe ? <span style={{ opacity:0.7 }}> G{task.groupe}</span> : ""}
+                          </span>
+                          
+                          {slotLabel && <span style={{ fontSize:8, fontWeight:700, opacity:0.8, flexShrink:0 }}>{slotLabel}</span>}
+                          
+                          {!isCancelled && meta.prog.pct > 0 && (
+                            <div style={{ position:"absolute", bottom:0, left:0, height:2, width:`${meta.prog.pct}%`, background:isConf?cfColor:pal.text, opacity:0.35, borderRadius:"0 0 0 3px" }} />
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {more > 0 && expandedDay !== ds && (
+                      <div onClick={e => { e.stopPropagation(); setExpandedDay(ds); }} style={{ fontSize:9,color:T.accent,paddingLeft:6,fontStyle:"italic",cursor:"pointer",fontWeight:600 }}>
+                        +{more} autre{more>1?"s":""}
+                      </div>
+                    )}
+                    {expandedDay === ds && tasks_.length > 4 && (
+                      <div onClick={e => { e.stopPropagation(); setExpandedDay(null); }} style={{ fontSize:9,color:T.pageSub,paddingLeft:6,fontStyle:"italic",cursor:"pointer" }}>
+                        ▲ Réduire
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -4075,22 +4957,23 @@ const [selectedTask, setSelectedTask] = useState(null);
       <div style={{ display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:T.pageSub,paddingBottom:4 }}>
         {[
           { bg:"rgba(212,76,71,0.15)",  bd:"#d44c47", label:"Conflit"          },
+          { bg:"#f5f5f5",              bd:"#ccc",    label:"Annulé (barré)", dashed: true },
           { bg:"rgba(51,126,169,0.1)",  bd:"#337ea9", label:"Congé"            },
           { bg:"rgba(68,131,97,0.07)",  bd:"#448361", label:"Férié religieux"  },
           { bg:"rgba(212,76,71,0.05)",  bd:"#d9730d", label:"Férié national"   },
           { bg:"rgba(55,53,47,0.03)",   bd:"rgba(55,53,47,0.2)", label:"Weekend" },
         ].map(l => (
           <div key={l.label} style={{ display:"flex",alignItems:"center",gap:5 }}>
-            <div style={{ width:12,height:12,borderRadius:2,background:l.bg,border:`1px solid ${l.bd}`,flexShrink:0 }} />
+            <div style={{ 
+              width:12, height:12, borderRadius:2, 
+              background:l.bg, 
+              border:`1px ${l.dashed ? 'dashed' : 'solid'} ${l.bd}`, 
+              flexShrink:0 
+            }} />
             {l.label}
           </div>
         ))}
-        <div style={{ display:"flex",alignItems:"center",gap:5 }}>
-          <div style={{ width:24,height:12,borderRadius:2,background:"linear-gradient(to right,rgba(15,125,219,0.2) 40%,transparent)",border:"1px solid rgba(15,125,219,0.3)",flexShrink:0 }} />
-          Avancement (barre en bas)
-        </div>
       </div>
-
     </div>
   );
 }
@@ -4170,6 +5053,483 @@ function ConfirmMoveModal({ pendingUpdate, onConfirm, onCancel }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// CABINET NOTIFICATION MODAL
+// ═══════════════════════════════════════════════════════════════
+function CabinetNotificationModal({ tasks, wsId, showToast, onClose }) {
+  const [cabinetEmail, setCabinetEmail] = useState("");
+const [period, setPeriod] = useState("this_week");
+const [customDays, setCustomDays] = useState(7);
+  const [sending, setSending]           = useState(false);
+  const [preview, setPreview]           = useState([]);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+
+  // --- CONFIG AUTO ---
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoFreq, setAutoFreq] = useState("weekly_monday");
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  useEffect(() => {
+    setLoadingConfig(true);
+    apiFetch("/notifications/m2s-config")
+      .then(res => {
+        if (res.success && res.data) {
+          setAutoEnabled(res.data.enabled ?? false);
+          setAutoFreq(res.data.frequency || "weekly_monday");
+          setCabinetEmail(res.data.recipientEmail || "");
+          setPeriod(res.data.period || "this_week");
+          setCustomDays(res.data.customDays || 7);
+        } else {
+          // Fallback to localStorage only if DB has nothing
+          setCabinetEmail(localStorage.getItem("lastCabinetEmail") || "");
+          setPeriod(localStorage.getItem("lastCabinetPeriod") || "this_week");
+          setCustomDays(parseInt(localStorage.getItem("lastCabinetCustomDays")) || 7);
+        }
+      })
+      .catch(err => console.error("Error fetching config:", err))
+      .finally(() => setLoadingConfig(false));
+  }, []);
+
+  const handleSaveConfig = async () => {
+    if (!cabinetEmail.trim()) return showToast("Email requis pour la planification", "error");
+    setSavingConfig(true);
+    try {
+      await apiFetch("/notifications/m2s-config", {
+        method: "POST",
+        body: { 
+          enabled: autoEnabled, 
+          recipientEmail: cabinetEmail.trim(), 
+          frequency: autoFreq,
+          period: period,
+          customDays: customDays
+        }
+      });
+
+      // Mettre aussi à jour la mémoire locale pour la cohérence de l'interface
+      localStorage.setItem("lastCabinetEmail", cabinetEmail.trim());
+      localStorage.setItem("lastCabinetPeriod", period);
+      localStorage.setItem("lastCabinetCustomDays", customDays.toString());
+
+      showToast("Planification mise à jour", "success");
+    } catch (err) {
+      showToast("Erreur sauvegarde : " + err.message, "error");
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  // Calculate upcoming tasks based on period
+  useEffect(() => {
+    const now = new Date(); now.setHours(0,0,0,0);
+    const today = d2s(now);
+
+    let cutoff;
+    if (period === "this_week") {
+      const end = new Date(now);
+      end.setDate(now.getDate() + (7 - now.getDay()));
+      cutoff = d2s(end);
+    } else if (period === "next_week") {
+      const start = new Date(now);
+      start.setDate(now.getDate() + (7 - now.getDay() + 1));
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      setPreview(tasks.filter(t => t.start && t.start >= d2s(start) && t.start <= d2s(end)));
+      return;
+    } else if (period === "next_2_weeks") {
+      const end = new Date(now);
+      end.setDate(now.getDate() + 14);
+      cutoff = d2s(end);
+    } else {
+      const end = new Date(now);
+      end.setDate(now.getDate() + parseInt(customDays || 7));
+      cutoff = d2s(end);
+    }
+
+    if (period !== "next_week") {
+      setPreview(tasks.filter(t => t.start && t.start >= today && t.start <= cutoff));
+    }
+  }, [tasks, period, customDays]);
+
+  const handleSend = async () => {
+    if (!cabinetEmail.trim()) { showToast("Veuillez entrer l'email du cabinet", "error"); return; }
+    if (preview.length === 0)  { showToast("Aucune formation à notifier pour cette période", "error"); return; }
+    setSending(true);
+    try {
+      const periodLabel =
+        period === "this_week"    ? "cette semaine" :
+        period === "next_week"    ? "la semaine prochaine" :
+        period === "next_2_weeks" ? "les 2 prochaines semaines" :
+        `les ${customDays} prochains jours`;
+
+      await apiFetch(`/workspaces/${wsId}/notify-cabinet`, {
+        method: "POST",
+        body: { cabinetEmail, period: periodLabel, tasks: preview },
+      });
+
+      // Sauvegarde des préférences côté serveur pour la persistance entre appareils
+      await apiFetch("/notifications/m2s-config", {
+        method: "POST",
+        body: { 
+          enabled: autoEnabled, 
+          recipientEmail: cabinetEmail.trim(), 
+          frequency: autoFreq,
+          period: period,
+          customDays: customDays
+        }
+      });
+
+      // Sauvegarde locale en plus (optionnel)
+      localStorage.setItem("lastCabinetEmail", cabinetEmail.trim());
+      localStorage.setItem("lastCabinetPeriod", period);
+      localStorage.setItem("lastCabinetCustomDays", customDays.toString());
+
+      showToast(`Email envoyé avec succès à ${cabinetEmail}`, "success");
+      onClose();
+    } catch (err) {
+      showToast("Erreur : " + err.message, "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const periodOptions = [
+    { value: "this_week",    label: "Cette semaine" },
+    { value: "next_week",    label: "Semaine prochaine" },
+    { value: "next_2_weeks", label: "2 prochaines semaines" },
+    { value: "custom",       label: "Personnalisé…" },
+  ];
+
+  // ── Notion-style tokens ──────────────────────────────────────────────
+  const colors = {
+    bg:          "#fff",
+    bgSurface:   "rgba(55,53,47,0.03)",
+    bgHover:     "rgba(55,53,47,0.06)",
+    border:      "rgba(55,53,47,0.12)",
+    borderFocus: "rgba(55,53,47,0.28)",
+    text:        "#37352f",
+    textSub:     "rgba(55,53,47,0.65)",
+    textTer:     "rgba(55,53,47,0.4)",
+    blue:        "#2383e2",
+    blueBg:      "rgba(35,131,226,0.08)",
+    blueBorder:  "rgba(35,131,226,0.35)",
+    redBg:       "rgba(235,87,87,0.08)",
+    redText:     "#eb5757",
+  };
+
+  const iS = {
+    width: "100%", boxSizing: "border-box",
+    padding: "7px 10px", fontSize: 14,
+    borderRadius: 4, border: `1px solid ${colors.border}`,
+    background: colors.bg, color: colors.text,
+    fontFamily: "inherit", outline: "none",
+    transition: "border-color 0.15s",
+  };
+
+  const labelS = {
+    display: "block", fontSize: 12, fontWeight: 500,
+    color: colors.textSub, marginBottom: 6,
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 900,
+        background: "rgba(15,15,15,0.6)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+      onMouseDown={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: colors.bg,
+        borderRadius: 6,
+        width: "min(520px, 95vw)",
+        boxShadow: "rgba(15,15,15,0.1) 0px 0px 0px 1px, rgba(15,15,15,0.2) 0px 8px 40px",
+        fontFamily: "-apple-system,'Segoe UI',sans-serif",
+        overflow: "hidden",
+      }}>
+
+        {/* ── Header ── */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px 14px",
+          borderBottom: `1px solid ${colors.border}`,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: 6,
+              background: colors.blueBg,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Mail style={{ width: 15, height: 15, color: colors.blue }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
+                Notifier le cabinet
+              </div>
+              <div style={{ fontSize: 11, color: colors.textTer, marginTop: 1 }}>
+                Envoi d'un email récapitulatif
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 26, height: 26, borderRadius: 4,
+              border: "none", background: "transparent",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              color: colors.textTer,
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = colors.bgHover}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        </div>
+
+        {/* ── Body ── */}
+        <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Email */}
+          <div>
+            <label style={labelS}>Email du cabinet</label>
+            <div style={{ position: "relative" }}>
+              <Mail style={{
+                position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)",
+                width: 13, height: 13, color: colors.textTer, pointerEvents: "none",
+              }} />
+              <input
+                type="email"
+                value={cabinetEmail}
+                onChange={e => setCabinetEmail(e.target.value)}
+                placeholder="cabinet@example.com"
+                style={{ ...iS, paddingLeft: 28 }}
+                onFocus={e  => e.target.style.borderColor = colors.borderFocus}
+                onBlur={e   => e.target.style.borderColor = colors.border}
+              />
+            </div>
+          </div>
+
+          {/* Period */}
+          <div>
+            <label style={labelS}>Période à notifier</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {periodOptions.map(opt => {
+                const active = period === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPeriod(opt.value)}
+                    style={{
+                      padding: "5px 12px", borderRadius: 4, fontSize: 13,
+                      fontFamily: "inherit", cursor: "pointer",
+                      border: `1px solid ${active ? colors.blueBorder : colors.border}`,
+                      background: active ? colors.blueBg : "transparent",
+                      color: active ? colors.blue : colors.textSub,
+                      fontWeight: active ? 500 : 400,
+                      transition: "all 0.12s",
+                    }}
+                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = colors.bgHover; }}
+                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            {period === "custom" && (
+              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number" min={1} max={90}
+                  value={customDays}
+                  onChange={e => setCustomDays(e.target.value)}
+                  style={{ ...iS, width: 72 }}
+                  onFocus={e => e.target.style.borderColor = colors.borderFocus}
+                  onBlur={e  => e.target.style.borderColor = colors.border}
+                />
+                <span style={{ fontSize: 13, color: colors.textSub }}>jours à partir d'aujourd'hui</span>
+              </div>
+            )}
+          </div>
+
+          {/* --- Section Planification Automatique --- */}
+          <div style={{
+            padding: "14px 16px",
+            background: colors.bgSurface,
+            borderRadius: 6,
+            border: `1px solid ${autoEnabled ? colors.blueBorder : colors.border}`,
+            transition: "all 0.2s",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: autoEnabled ? 12 : 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Clock4 size={14} color={autoEnabled ? colors.blue : colors.textTer} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Envoi automatique</span>
+              </div>
+              <div
+                onClick={() => setAutoEnabled(!autoEnabled)}
+                style={{
+                  width: 32, height: 18, borderRadius: 10,
+                  background: autoEnabled ? colors.blue : colors.textTer,
+                  position: "relative", cursor: "pointer", transition: "0.2s",
+                }}
+              >
+                <div style={{
+                  width: 14, height: 14, borderRadius: "50%", background: "#fff",
+                  position: "absolute", top: 2, left: autoEnabled ? 16 : 2,
+                  transition: "0.2s",
+                }} />
+              </div>
+            </div>
+
+            {autoEnabled && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, animation: "fadeIn 0.2s" }}>
+                <div style={{ height: 1, background: colors.border }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ ...labelS, marginBottom: 4 }}>Fréquence d'envoi</label>
+                    <select
+                      value={autoFreq}
+                      onChange={e => setAutoFreq(e.target.value)}
+                      style={{ ...iS, padding: "5px 8px", fontSize: 13 }}
+                    >
+                      <option value="daily">Chaque matin (à 8h)</option>
+                      <option value="weekly_monday">Chaque Lundi (à 8h)</option>
+                      <option value="monthly_1st">Chaque 1er du mois (à 8h)</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={savingConfig}
+                    style={{
+                      marginTop: 18, padding: "6px 12px", borderRadius: 4,
+                      background: colors.text, color: "#fff", fontSize: 12,
+                      fontWeight: 600, border: "none", cursor: "pointer",
+                      opacity: savingConfig ? 0.7 : 1, transition: "0.15s",
+                    }}
+                  >
+                    {savingConfig ? "..." : "Enregistrer"}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: colors.textTer, fontStyle: "italic" }}>
+                  Le système enverra automatiquement le récapitulatif <strong>{
+                    period === "this_week" ? "de cette semaine" :
+                    period === "next_week" ? "de la semaine prochaine" :
+                    period === "next_2_weeks" ? "des 2 prochaines semaines" :
+                    `des ${customDays} prochains jours`
+                  }</strong> à l'adresse indiquée ci-dessus.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Preview list */}
+          <div style={{
+            border: `1px solid ${colors.border}`,
+            borderRadius: 4, overflow: "hidden",
+          }}>
+            {/* List header */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "7px 12px",
+              background: colors.bgSurface,
+              borderBottom: `1px solid ${colors.border}`,
+            }}>
+              <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSub, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Formations à notifier
+              </span>
+              <span style={{
+                fontSize: 11, fontWeight: 500, padding: "2px 7px", borderRadius: 99,
+                background: preview.length > 0 ? colors.blueBg  : colors.redBg,
+                color:      preview.length > 0 ? colors.blue     : colors.redText,
+                border: `1px solid ${preview.length > 0 ? colors.blueBorder : "rgba(235,87,87,0.25)"}`,
+              }}>
+                {preview.length} formation{preview.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            {/* Rows */}
+            <div style={{ maxHeight: 200, overflowY: "auto" }}>
+              {preview.length === 0 ? (
+                <div style={{ padding: "28px 0", textAlign: "center", color: colors.textTer, fontSize: 13 }}>
+                  Aucune formation planifiée pour cette période
+                </div>
+              ) : preview.map((t, i) => {
+                let grp = t.groupe || "";
+                if (!grp && t.name?.includes(" — Grp ")) grp = t.name.split(" — Grp ")[1];
+                return (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "9px 12px",
+                    borderBottom: i < preview.length - 1 ? `1px solid ${colors.border}` : "none",
+                    transition: "background 0.1s",
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background = colors.bgSurface}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    <div style={{ width: 5, height: 5, borderRadius: "50%", background: colors.blue, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {t.group}{grp ? ` — Grp ${grp}` : ""}
+                      </div>
+                      <div style={{ fontSize: 11, color: colors.textSub, marginTop: 1 }}>
+                        Client : <span style={{ color: colors.blue }}>{t.client}</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: colors.textTer, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                      {t.start ? fmt(t.start) : "—"} → {t.end ? fmt(t.end) : "—"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{
+          display: "flex", justifyContent: "flex-end", gap: 8,
+          padding: "12px 20px",
+          borderTop: `1px solid ${colors.border}`,
+          background: colors.bgSurface,
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "6px 14px", fontSize: 13, borderRadius: 4,
+              border: `1px solid ${colors.border}`,
+              background: "transparent", color: colors.textSub,
+              cursor: "pointer", fontFamily: "inherit",
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = colors.bgHover}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+          >
+            Annuler
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 16px", fontSize: 13, fontWeight: 500,
+              borderRadius: 4, border: "none",
+              background: sending ? "rgba(55,53,47,0.35)" : colors.text,
+              color: "#fff",
+              cursor: sending ? "not-allowed" : "pointer",
+              fontFamily: "inherit",
+              transition: "background 0.12s",
+            }}
+          >
+            {sending ? <Spinner size={13} color="#fff" /> : <Mail style={{ width: 13, height: 13 }} />}
+            {sending ? "Envoi…" : "Envoyer l'email"}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // GANTT VIEW — Version complète avec toggle Gantt/Calendrier
 // ═══════════════════════════════════════════════════════════════
 function GanttView({
@@ -4201,6 +5561,7 @@ const [pendingUpdate, setPendingUpdate] = useState(null);
   const [viewMode, setViewMode] = useState("gantt"); // "gantt" | "calendar"
  const [selectedTaskForDrawer, setSelectedTaskForDrawer] = useState(null);
  const [printDoc, setPrintDoc] = useState(null);
+
   // Ajouter ce hook en haut du composant GanttView
 const [windowW, setWindowW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
 useEffect(() => {
@@ -4211,6 +5572,9 @@ useEffect(() => {
 
 const isMobile  = windowW < 768;
 const isTablet  = windowW < 1024;
+
+const tasksRef = useRef(tasks);
+useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   const contRef  = useRef(null), hdrRef = useRef(null), scrRef = useRef(null), listRef = useRef(null);
   const scrollLeftRef = useRef(0), scrollRafRef = useRef(null);
@@ -4385,48 +5749,90 @@ const SC = useMemo(() => GCOLS
     return rows;
   },[displayTasks,ganttFilters,ganttSortField,ganttSortDir,metaCache,candidatCountByKey]);
 
-  const updTask = useCallback(async (taskId, start, end) => {
-  const task = tasks.find(t => t.id === taskId || t._id === taskId);
-  if (!task) return;
-  
-  const delta = (() => {
-    if (!task.start || !start) return 0;
-    const old = new Date(task.start), next = new Date(start);
-    const diff = Math.round((next - old) / (1000 * 60 * 60 * 24));
-    return diff;
-  })();
-
-  setPendingUpdate({
-    taskId,
-    start,
-    end,
-    oldStart: task.start,
-    oldEnd: task.end,
-    label: task.group,
-    groupe: task.groupe,
-    delta,                  // ← on passe le delta déjà calculé
+  // À mettre dans GanttView
+const cancelledKeys = useMemo(() => {
+  const map = {};
+  candidats.forEach(c => {
+    const k = `${(c.theme || "").trim()}||${String(c.groupe || "1")}`;
+    if (!map[k]) map[k] = [];
+    map[k].push(c.statut);
   });
-}, [tasks]);
+  
+  const cancelled = new Set();
+  Object.entries(map).forEach(([key, statuses]) => {
+    // Si tous les candidats du groupe sont "Annulé"
+    if (statuses.length > 0 && statuses.every(s => s === "Annulé")) {
+      cancelled.add(key);
+    }
+  });
+  return cancelled;
+}, [candidats]);
 
+// 1. On modifie updTask pour qu'elle n'appelle PAS l'API tout de suite
+const updTask = useCallback((taskId, start, end) => {
+  const task = tasksRef.current.find(t => t.id === taskId || t._id === taskId);
+  if (!task) return;
+
+  const delta = !task.start || !start ? 0
+    : Math.round((new Date(start) - new Date(task.start)) / (1000 * 60 * 60 * 24));
+
+  if (delta === 0) return;
+
+  // On ouvre la modal avec toutes les infos nécessaires pour la sauvegarde future
+  setPendingUpdate({
+    taskId, 
+    start, 
+    end,
+    oldStart: task.start, 
+    oldEnd: task.end,
+    label: task.group, 
+    groupe: String(task.groupe || "1"), 
+    delta,
+  });
+}, []);
+
+// 2. C'est ici, au clic sur "Confirmer", qu'on enregistre vraiment
 const confirmUpdate = useCallback(async () => {
   if (!pendingUpdate) return;
-  const { taskId, start, end } = pendingUpdate;
-  const task = tasks.find(t => t.id === taskId || t._id === taskId);
-  if (!task) { setPendingUpdate(null); return; }
-  const theme = task.group, groupe = task.groupe || "";
-  setTasks(prev => prev.map(t => (t.id === taskId || t._id === taskId) ? { ...t, start, end } : t));
-  if (typeof setCandidats === "function")
-    setCandidats(prev => prev.map(c => (c.theme === theme && String(c.groupe) === String(groupe)) ? { ...c, dateDebut: start, dateFin: end } : c));
-  if (typeof setDocuments === "function")
-    setDocuments(prev => prev.map(d => (d.theme === theme && String(d.groupe) === String(groupe)) ? { ...d, dateDoc: start } : d));
+
+  const { taskId, start, end, label, groupe } = pendingUpdate;
+
   try {
-    await apiFetch(`/workspaces/${wsId}/gantt/group-dates`, { method: "PATCH", body: { theme, groupe: String(groupe), start, end } });
+    // 1. Appel API
+    const response = await apiFetch(`/workspaces/${wsId}/gantt/group-dates`, {
+      method: "PATCH",
+      body: { 
+        theme: label.trim(), // Nettoyage
+        groupe: String(groupe).trim(), 
+        start, 
+        end 
+      }
+    });
+
+    if (response.success) {
+      // 2. Mise à jour de l'état local (uniquement si le serveur a réussi)
+      setTasks(prev => prev.map(t =>
+        (t.id === taskId || t._id === taskId) ? { ...t, start, end } : t
+      ));
+      
+      if (typeof setCandidats === "function") {
+        setCandidats(prev => prev.map(c =>
+          (c.theme === label && String(c.groupe) === String(groupe))
+            ? { ...c, dateDebut: start, dateFin: end }
+            : c
+        ));
+      }
+      showToast("Dates enregistrées", "success");
+    } else {
+      showToast("Le serveur n'a pas pu mettre à jour les dates", "error");
+    }
   } catch (err) {
-    try { await apiFetch(`/tasks/${taskId}/dates`, { method: "PATCH", body: { start, end } }); }
-    catch (err2) { showToast("Erreur synchronisation : " + err2.message); }
+    console.error("Erreur save:", err);
+    showToast("Erreur de connexion au serveur", "error");
+  } finally {
+    setPendingUpdate(null); // Ferme la modal
   }
-  setPendingUpdate(null);
-}, [pendingUpdate, tasks, wsId, setTasks, setCandidats, setDocuments, showToast]);
+}, [pendingUpdate, wsId, setTasks, setCandidats, showToast]);
 
   const updTaskSlot = useCallback(async (taskId,newSlot)=>{
     const task=tasks.find(t=>t.id===taskId||t._id===taskId); if(!task)return;
@@ -4665,6 +6071,9 @@ const confirmUpdate = useCallback(async () => {
           <button onClick={exportGantt} disabled={displayTasks.length===0} style={{display:"flex",alignItems:"center",gap:5,height:26,padding:"0 10px",fontSize:13,fontWeight:500,color:T.pageText,background:"transparent",border:`1px solid rgba(55,53,47,0.25)`,borderRadius:4,cursor:displayTasks.length===0?"not-allowed":"pointer",fontFamily:"inherit",opacity:displayTasks.length===0?0.4:1}}>
             <FileUp style={{width:13,height:13}}/> Exporter Excel
           </button>
+
+
+
           <button onClick={()=>{setEditId("new");setForm({group:"",groupe:"",start:"",end:"",nbJ:1});}} style={{display:"flex",alignItems:"center",gap:5,height:26,padding:"0 10px",fontSize:13,fontWeight:500,color:"#fff",background:"#37352f",border:"none",borderRadius:4,cursor:"pointer",fontFamily:"inherit"}}>
             <Plus style={{width:13,height:13}}/> Nouvelle tâche
           </button>
@@ -4833,11 +6242,50 @@ const confirmUpdate = useCallback(async () => {
                     </div>
                   </div>
                   <div style={{position:"absolute",top:startIdx*RH,left:0,right:0}}>
-                    {visible.map(t=>{
-                      if(editId===t.id||editId===t._id)return <EditRow key={t.id} isNew={false}/>;
-                      const cfKey=`${t.group}||${t.groupe||""}`,isLiveConflict=liveConflictTaskKeys.has(cfKey),conflictTypes=conflictTypesMap[cfKey]||null,meta=metaCache[t.id]||{wdays:1,prog:{pct:0}},candidatCount=candidatCountByKey[cfKey]||0;
-                      return(<GRow key={t.id} task={t} SC={SC} cs={cs} zoom={zoom} projStart={projStart} totalDays={totalDays} todayOff={todayOff} wd={wd} sh={sh} vacs={vacs} onEdit={()=>startEdit(t)} onDelete={()=>delTask(t.id||t._id)} onUpdate={updTask} onUpdateSlot={updTaskSlot} registerScrollable={registerScrollable} unregisterScrollable={unregisterScrollable} slotMap={slotMap} isLiveConflict={isLiveConflict} conflictTypes={conflictTypes} wdays={meta.wdays} prog={meta.prog} candidatCount={candidatCount}  onOpenDrawer={() => setSelectedTaskForDrawer(t)}/>);
-                    })}
+                    {visible.map(t => {
+  if (editId === t.id || editId === t._id) return <EditRow key={t.id} isNew={false} />;
+  
+  // 1. On prépare la clé du groupe
+  const cfKey = `${(t.group || "").trim()}||${String(t.groupe || "")}`;
+  
+  // 2. ON DÉFINIT LA VARIABLE QUI MANQUAIT (isCancelled)
+  const isCancelled = cancelledKeys.has(cfKey); 
+
+  const isLiveConflict = liveConflictTaskKeys.has(cfKey);
+  const conflictTypes = conflictTypesMap[cfKey] || null;
+  const meta = metaCache[t.id] || { wdays: 1, prog: { pct: 0 } };
+  const candidatCount = candidatCountByKey[cfKey] || 0;
+
+  return (
+    <GRow
+      key={t.id}
+      task={t}
+      SC={SC}
+      cs={cs}
+      zoom={zoom}
+      projStart={projStart}
+      totalDays={totalDays}
+      todayOff={todayOff}
+      wd={wd}
+      sh={sh}
+      vacs={vacs}
+      onEdit={() => startEdit(t)}
+      onDelete={() => delTask(t.id || t._id)}
+      onUpdate={updTask}
+      onUpdateSlot={updTaskSlot}
+      registerScrollable={registerScrollable}
+      unregisterScrollable={unregisterScrollable}
+      slotMap={slotMap}
+      isLiveConflict={isLiveConflict}
+      conflictTypes={conflictTypes}
+      wdays={meta.wdays}
+      prog={meta.prog}
+      candidatCount={candidatCount}
+      onOpenDrawer={() => setSelectedTaskForDrawer(t)}
+      isCancelled={isCancelled} // On passe la variable définie au dessus
+    />
+  );
+})}
                   </div>
                 </div>
               </div>
@@ -4925,6 +6373,8 @@ const confirmUpdate = useCallback(async () => {
           ws={ws}
         />
       )}
+
+
     </div>
   );
 }
@@ -7452,6 +8902,13 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
   const [multiImportOpen,  setMultiImportOpen]  = useState(false);
   const colPickerRef = useRef(null);
 
+  // ── AJOUT : STYLE POUR LES STATUTS (dont Annulé) ──
+  const getStatusScheme = (statut) => {
+    if (statut === "Annulé") return { text: "#787774", bg: "rgba(227,226,224,0.5)", bd: "rgba(55,53,47,0.2)" };
+    const found = C_STATUS.find(s => s.key === statut);
+    return found ? { text: found.text, bg: found.bg, bd: found.bd } : T.tagGray;
+  };
+
   // ── Export Excel ──────────────────────────────────────────────
   const exportCandidats = () => {
     const groupCounts = {};
@@ -7536,14 +8993,15 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
   const save = async f => {
     setSaving(true);
     try {
-      if (modal === "new") { const body={...f,createdAt:new Date().toISOString()}; const created=norm(await apiFetch(`/workspaces/${wsId}/candidats`,{method:"POST",body})); setCandidats(p=>{const n=[...p,created];syncCache(n);return n;}); }
-      else { const updated=norm(await apiFetch(`/candidats/${modal.id}`,{method:"PUT",body:f})); setCandidats(p=>{const n=p.map(c=>c.id===modal.id?updated:c);syncCache(n);return n;}); }
+      if (modal === "new") { const body={...f,createdAt:new Date().toISOString()}; const created=norm(await apiFetch(`/workspaces/${wsId}/candidats`,{method:"POST",body})); setCandidats(p=>{const n=[...p,created]; return n;}); }
+      else { const updated=norm(await apiFetch(`/candidats/${modal.id}`,{method:"PUT",body:f})); setCandidats(p=>{const n=p.map(c=>c.id===modal.id?updated:c); return n;}); }
     } catch(e) { showToast("Erreur : "+e.message); }
     setSaving(false); setModal(null);
   };
 
   const delCand = async id => {
-    setCandidats(p=>{const n=p.filter(c=>c.id!==id);syncCache(n);return n;});
+    if(!window.confirm("Supprimer ce candidat ?")) return;
+    setCandidats(p=>{const n=p.filter(c=>c.id!==id); return n;});
     try { await apiFetch(`/candidats/${id}`,{method:"DELETE"}); } catch(e) { showToast("Erreur suppression : "+e.message); }
   };
 
@@ -7696,34 +9154,29 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
               <MultiBaseImportWizard
                 onClose={()=>setMultiImportOpen(false)}
                 onDone={async () => {
-  // 1. Vider les états locaux pour forcer le rafraîchissement visuel
-  setTasks([]);
-  setCandidats([]);
-  setDocuments([]);
-
-  showToast("Importation réussie, synchronisation...", "success");
-
-  // 2. Attendre que le serveur finisse d'écrire
-  setTimeout(async () => {
-    try {
-      const [resTasks, resCands, resDocs] = await Promise.all([
-        apiFetch(`/workspaces/${wsId}/tasks`), // <-- Changé ici : wsId au lieu de activeWs
-        apiFetch(`/workspaces/${wsId}/candidats?limit=5000`), // <-- Changé ici
-        apiFetch(`/workspaces/${wsId}/documents`), // <-- Changé ici
-      ]);
-
-      // 3. Mettre à jour avec les données réelles du serveur
-      setTasks(normArr(extractArray(resTasks, "tasks")));
-      setCandidats(normArr(extractArray(resCands, "candidats")));
-      setDocuments(normArr(extractArray(resDocs, "documents")));
-      
-      showToast("Données mises à jour", "success");
-    } catch (e) {
-      console.error("Erreur sync après import:", e);
-      showToast("Erreur de rafraîchissement", "error");
-    }
-  }, 1500);
-}}
+                  // 1. Vider les états locaux pour forcer le rafraîchissement visuel
+                  setTasks([]);
+                  setCandidats([]);
+                  setDocuments([]);
+                  showToast("Importation réussie, synchronisation...", "success");
+                  // 2. Attendre que le serveur finisse d'écrire
+                  setTimeout(async () => {
+                    try {
+                      const [resTasks, resCands, resDocs] = await Promise.all([
+                        apiFetch(`/workspaces/${wsId}/tasks`),
+                        apiFetch(`/workspaces/${wsId}/candidats?limit=5000`),
+                        apiFetch(`/workspaces/${wsId}/documents`),
+                      ]);
+                      setTasks(normArr(extractArray(resTasks, "tasks")));
+                      setCandidats(normArr(extractArray(resCands, "candidats")));
+                      setDocuments(normArr(extractArray(resDocs, "documents")));
+                      showToast("Données mises à jour", "success");
+                    } catch (e) {
+                      console.error("Erreur sync après import:", e);
+                      showToast("Erreur de rafraîchissement", "error");
+                    }
+                  }, 1500);
+                }}
                 setTasks={setTasks}
                 wsStart={ws?.startDate||null}
                 wsEnd={ws?.endDate||null}
@@ -7795,26 +9248,59 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {Object.values(formationGroups).map(fg => {
             const pal = grpTag(fg.theme);
+            // ── Check si tout le groupe est annulé ──
+            const isGroupCancelled = fg.cands.every(c => c.statut === "Annulé");
+
             return (
-              <div key={`${fg.theme}||${fg.groupe}`} style={{ border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px", background:"rgba(55,53,47,0.02)", borderBottom:`1px solid ${T.pageBdr}`, flexWrap:"wrap" }}>
-                  <div style={{ width:8, height:8, borderRadius:2, background:pal.text, flexShrink:0 }}/>
-                  <div style={{ flex:1, fontSize:13, fontWeight:700, color:T.pageText, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fg.theme}</div>
-                  <Tag label={`Groupe ${fg.groupe}`} scheme={pal}/>
+              <div key={`${fg.theme}||${fg.groupe}`} style={{ 
+                border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden",
+                opacity: isGroupCancelled ? 0.6 : 1
+              }}>
+                <div style={{ 
+                  display:"flex", alignItems:"center", gap:10, padding:"10px 16px", 
+                  background: isGroupCancelled ? "#f5f5f5" : "rgba(55,53,47,0.02)", 
+                  borderBottom:`1px solid ${T.pageBdr}`, flexWrap:"wrap" 
+                }}>
+                  <div style={{ width:8, height:8, borderRadius:2, background: isGroupCancelled ? "#999" : pal.text, flexShrink:0 }}/>
+                  <div style={{ 
+                    flex:1, fontSize:13, fontWeight:700, color: isGroupCancelled ? "#888" : T.pageText, 
+                    minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                    textDecoration: isGroupCancelled ? "line-through" : "none",
+                    fontStyle: isGroupCancelled ? "italic" : "normal"
+                  }}>
+                    {fg.theme} {isGroupCancelled && "(ANNULÉ)"}
+                  </div>
+                  <Tag label={`Groupe ${fg.groupe}`} scheme={isGroupCancelled ? {text:"#777", bg:"#eee"} : pal}/>
                   <div style={{ display:"flex", gap:8, fontSize:12, color:T.pageSub, flexWrap:"wrap" }}>
-                    <span><span style={{ fontFamily:"monospace", fontWeight:600, color:T.pageText }}>{fg.jours===0.5?"½":fg.jours}</span> jour{fg.jours>1?"s":""}</span>
+                    <span style={{ textDecoration: isGroupCancelled ? "line-through" : "none" }}>
+                      <span style={{ fontFamily:"monospace", fontWeight:600, color:isGroupCancelled ? "#aaa" : T.pageText }}>{fg.jours===0.5?"½":fg.jours}</span> jour{fg.jours>1?"s":""}
+                    </span>
                     <span>·</span>
-                    <span><span style={{ fontFamily:"monospace", fontWeight:600, color:T.pageText }}>{fg.cands.length}</span> candidat{fg.cands.length>1?"s":""}</span>
-                    {fg.start && !isMobile && <><span>·</span><span style={{ fontFamily:"monospace", fontSize:11 }}>{fmt(fg.start)} → {fmt(fg.end)}</span></>}
+                    <span style={{ textDecoration: isGroupCancelled ? "line-through" : "none" }}>
+                      <span style={{ fontFamily:"monospace", fontWeight:600, color:isGroupCancelled ? "#aaa" : T.pageText }}>{fg.cands.length}</span> candidat{fg.cands.length>1?"s":""}
+                    </span>
+                    {fg.start && !isMobile && <><span>·</span><span style={{ fontFamily:"monospace", fontSize:11, textDecoration: isGroupCancelled ? "line-through" : "none" }}>{fmt(fg.start)} → {fmt(fg.end)}</span></>}
                   </div>
                 </div>
                 {fg.cands.map((c, i) => {
-                  const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
+                  const isCandCancelled = c.statut === "Annulé";
+                  const st = getStatusScheme(c.statut);
                   return (
-                    <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"7px 16px", borderBottom:i<fg.cands.length-1?`1px solid ${T.pageBdr}`:"none", background:"#fff", transition:"background 0.06s" }} onMouseEnter={e=>e.currentTarget.style.background=T.pageHov} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                    <div key={c.id} style={{ 
+                      display:"flex", alignItems:"center", gap:12, padding:"7px 16px", 
+                      borderBottom:i<fg.cands.length-1?`1px solid ${T.pageBdr}`:"none", 
+                      background: isCandCancelled ? "#fafafa" : "#fff", 
+                      transition:"background 0.06s",
+                      opacity: isCandCancelled ? 0.7 : 1
+                    }} onMouseEnter={e=>!isCandCancelled && (e.currentTarget.style.background=T.pageHov)} onMouseLeave={e=>!isCandCancelled && (e.currentTarget.style.background="#fff")}>
                       <div style={{ width:24, height:24, borderRadius:4, background:"rgba(55,53,47,0.07)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:T.pageSub, flexShrink:0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0)||""}</div>
-                      <span style={{ flex:1, fontSize:13, fontWeight:500, color:T.pageText, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.nom} {c.prenom}</span>
-                      {!isMobile && <Tag label={c.statut} scheme={{ text:st.text, bg:st.bg }}/>}
+                      <span style={{ 
+                        flex:1, fontSize:13, fontWeight:500, color: isCandCancelled ? "#999" : T.pageText, 
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        textDecoration: isCandCancelled ? "line-through" : "none",
+                        fontStyle: isCandCancelled ? "italic" : "normal"
+                      }}>{c.nom} {c.prenom}</span>
+                      {!isMobile && <Tag label={c.statut} scheme={st}/>}
                       <div style={{ display:"flex", gap:2 }}>
                         <button onClick={()=>setModal(c)} style={{ width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>e.currentTarget.style.background="rgba(55,53,47,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Edit2 style={{ width:10, height:10 }}/></button>
                         <button onClick={()=>delCand(c.id)} style={{ width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:10, height:10 }}/></button>
@@ -7831,13 +9317,18 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
             <div style={{ border:`1px solid ${T.pageBdr}`, borderRadius:6, overflow:"hidden" }}>
               <div style={{ padding:"10px 16px", background:"rgba(55,53,47,0.02)", borderBottom:`1px solid ${T.pageBdr}`, fontSize:13, fontWeight:600, color:T.pageSub }}>Sans formation assignée</div>
               {filtered.filter(c=>!c.theme).map((c, i, arr) => {
-                const st = C_STATUS.find(s => s.key === c.statut) || C_STATUS[0];
+                const isCandCancelled = c.statut === "Annulé";
+                const st = getStatusScheme(c.statut);
                 return (
-                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"9px 16px", borderBottom:i<arr.length-1?`1px solid ${T.pageBdr}`:"none", background:"#fff" }} onMouseEnter={e=>e.currentTarget.style.background=T.pageHov} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"9px 16px", borderBottom:i<arr.length-1?`1px solid ${T.pageBdr}`:"none", background: isCandCancelled ? "#fafafa" : "#fff", opacity: isCandCancelled ? 0.7 : 1 }} onMouseEnter={e=>!isCandCancelled && (e.currentTarget.style.background=T.pageHov)} onMouseLeave={e=>!isCandCancelled && (e.currentTarget.style.background="#fff")}>
                     <div style={{ width:26, height:26, borderRadius:4, background:"rgba(55,53,47,0.07)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:T.pageSub, flexShrink:0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0)||""}</div>
-                    <span style={{ flex:1, fontSize:13, fontWeight:600, color:T.pageText }}>{c.nom} {c.prenom}</span>
-                    {!isMobile && <span style={{ fontSize:12, color:T.pageSub }}>{c.poste||"—"}</span>}
-                    <Tag label={c.statut} scheme={{ text:st.text, bg:st.bg }}/>
+                    <span style={{ 
+                      flex:1, fontSize:13, fontWeight:600, color: isCandCancelled ? "#999" : T.pageText,
+                      textDecoration: isCandCancelled ? "line-through" : "none",
+                      fontStyle: isCandCancelled ? "italic" : "normal"
+                    }}>{c.nom} {c.prenom}</span>
+                    {!isMobile && <span style={{ fontSize:12, color:T.pageSub, textDecoration: isCandCancelled ? "line-through" : "none" }}>{c.poste||"—"}</span>}
+                    <Tag label={c.statut} scheme={st}/>
                     <div style={{ display:"flex", gap:2 }}>
                       <button onClick={()=>setModal(c)} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>e.currentTarget.style.background="rgba(55,53,47,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}><Edit2 style={{ width:11, height:11 }}/></button>
                       <button onClick={()=>delCand(c.id)} style={{ width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:3, border:"none", background:"transparent", cursor:"pointer", color:T.pageTer }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(212,76,71,0.1)";e.currentTarget.style.color="#d44c47";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=T.pageTer;}}><Trash2 style={{ width:11, height:11 }}/></button>
@@ -7867,7 +9358,6 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
         const hasDates = filtered.some(c => c.dateDebut || c.dateFin);
         const hasMat   = filtered.some(c => c.matricule);
 
-        // ── Colonnes adaptées au mobile ──
         const baseCols = [
           { key:"candidat", label:"Candidat", flex:"2fr" },
           { key:"theme",    label:"Thème",     flex: isMobile ? "1.2fr" : "1.5fr" },
@@ -7896,57 +9386,67 @@ function CandidatsView({ currentUser, candidats, setCandidats, tasks, setTasks, 
                 <div style={{ position:"absolute", top:startCI*CAND_ROW_H, left:0, right:0 }}>
                   {visibleCands.map((c, vi) => {
                     const i = startCI + vi;
+                    const isCancelled = c.statut === "Annulé";
                     const pal = c.theme ? grpTag(c.theme) : null;
                     const taskAssociee = tasks.find(t => (t.group===c.theme) && String(t.groupe)===String(c.groupe));
-                    const slotEffectif = taskAssociee?.slot || c.slot;
+                    
                     return (
-                      <div key={c.id} style={{ display:"grid", gridTemplateColumns:gridCols, padding:`0 ${isMobile?"10px":"16px"}`, borderBottom:i<filtered.length-1?`1px solid ${T.pageBdr}`:"none", alignItems:"center", background:"#fff", minHeight:CAND_ROW_H, transition:"background 0.06s" }} onMouseEnter={e=>e.currentTarget.style.background=T.pageHov} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                      <div key={c.id} style={{ 
+                        display:"grid", gridTemplateColumns:gridCols, padding:`0 ${isMobile?"10px":"16px"}`, 
+                        borderBottom:i<filtered.length-1?`1px solid ${T.pageBdr}`:"none", 
+                        alignItems:"center", 
+                        background: isCancelled ? "#fafafa" : "#fff", 
+                        minHeight:CAND_ROW_H, 
+                        transition:"background 0.06s",
+                        opacity: isCancelled ? 0.7 : 1
+                      }} onMouseEnter={e=>!isCancelled && (e.currentTarget.style.background=T.pageHov)} onMouseLeave={e=>!isCancelled && (e.currentTarget.style.background="#fff")}>
 
                         {/* Candidat */}
                         <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", minWidth:0 }}>
                           <div style={{ width:isMobile?22:26, height:isMobile?22:26, borderRadius:4, background:"rgba(55,53,47,0.07)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:T.pageSub, flexShrink:0 }}>{c.nom.charAt(0)}{c.prenom?.charAt(0)||""}</div>
                           <div style={{ minWidth:0 }}>
-                            <div style={{ fontSize:isMobile?12:13, fontWeight:600, color:T.pageText, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.nom} {c.prenom}</div>
+                            <div style={{ 
+                              fontSize:isMobile?12:13, fontWeight:600, 
+                              color: isCancelled ? "#999" : T.pageText, 
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                              textDecoration: isCancelled ? "line-through" : "none",
+                              fontStyle: isCancelled ? "italic" : "normal"
+                            }}>{c.nom} {c.prenom}</div>
                           </div>
                         </div>
 
                         {/* Thème */}
-                        <div style={{ fontSize:12, color:T.pageSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:8 }}>
-                          {c.theme ? <Tag label={c.theme} scheme={pal}/> : (c.poste||"—")}
+                        <div style={{ fontSize:12, color:T.pageSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:8, textDecoration: isCancelled ? "line-through" : "none" }}>
+                          {c.theme ? <Tag label={c.theme} scheme={isCancelled ? {text:"#999", bg:"#eee"} : pal}/> : (c.poste||"—")}
                         </div>
 
                         {/* Durée */}
-                        <div style={{ fontSize:12, color:T.pageSub, display:"flex", alignItems:"center", gap:4 }}>
+                        <div style={{ fontSize:12, color:T.pageSub, display:"flex", alignItems:"center", gap:4, textDecoration: isCancelled ? "line-through" : "none" }}>
                           {c.jours ? (
                             <>
-                              <span style={{ fontFamily:"monospace", fontWeight:700, color:T.pageText }}>{c.jours===0.5?"½":c.jours}</span>
+                              <span style={{ fontFamily:"monospace", fontWeight:700, color:isCancelled ? "#aaa" : T.pageText }}>{c.jours===0.5?"½":c.jours}</span>
                               <span style={{ color:T.pageTer }}>j</span>
-                              {c.jours === 0.5 && slotEffectif && (
-                                <span style={{ fontSize:9, fontWeight:800, padding:"1px 4px", borderRadius:3, background:slotEffectif==="matin"?"rgba(217,115,13,0.12)":"rgba(15,125,219,0.12)", color:slotEffectif==="matin"?"#d9730d":"#0f7ddb", border:`1px solid ${slotEffectif==="matin"?"rgba(217,115,13,0.3)":"rgba(15,125,219,0.3)"}`, textTransform:"uppercase" }}>
-                                  {slotEffectif==="matin"?"AM":"PM"}
-                                </span>
-                              )}
                             </>
                           ) : "—"}
                         </div>
 
                         {/* Groupe (desktop seulement) */}
                         {!isMobile && (
-                          <div style={{ fontSize:12, color:T.pageSub }}>
-                            {c.groupe ? <><span style={{ color:T.pageTer, fontSize:11 }}>Grp </span><span style={{ fontFamily:"monospace", fontWeight:700, color:T.pageText }}>{c.groupe}</span></> : "—"}
+                          <div style={{ fontSize:12, color:T.pageSub, textDecoration: isCancelled ? "line-through" : "none" }}>
+                            {c.groupe ? <><span style={{ color:T.pageTer, fontSize:11 }}>Grp </span><span style={{ fontFamily:"monospace", fontWeight:700, color:isCancelled ? "#aaa" : T.pageText }}>{c.groupe}</span></> : "—"}
                           </div>
                         )}
 
                         {/* Dates (desktop seulement) */}
-                        {!isMobile && hasDates && <div style={{ fontSize:11, fontFamily:"monospace", color:c.dateDebut?T.pageText:T.pageTer }}>{c.dateDebut?fmt(c.dateDebut):"—"}</div>}
-                        {!isMobile && hasDates && <div style={{ fontSize:11, fontFamily:"monospace", color:c.dateFin?T.pageText:T.pageTer }}>{c.dateFin?fmt(c.dateFin):"—"}</div>}
+                        {!isMobile && hasDates && <div style={{ fontSize:11, fontFamily:"monospace", color:c.dateDebut?T.pageText:T.pageTer, textDecoration: isCancelled ? "line-through" : "none" }}>{c.dateDebut?fmt(c.dateDebut):"—"}</div>}
+                        {!isMobile && hasDates && <div style={{ fontSize:11, fontFamily:"monospace", color:c.dateFin?T.pageText:T.pageTer, textDecoration: isCancelled ? "line-through" : "none" }}>{c.dateFin?fmt(c.dateFin):"—"}</div>}
 
                         {/* Matricule (desktop seulement) */}
-                        {!isMobile && hasMat && <div style={{ fontSize:11, fontFamily:"monospace", color:c.matricule?T.pageText:T.pageTer, fontWeight:c.matricule?500:400 }}>{c.matricule||"—"}</div>}
+                        {!isMobile && hasMat && <div style={{ fontSize:11, fontFamily:"monospace", color:c.matricule?T.pageText:T.pageTer, fontWeight:c.matricule?500:400, textDecoration: isCancelled ? "line-through" : "none" }}>{c.matricule||"—"}</div>}
 
                         {/* Colonnes extra (desktop seulement) */}
                         {extraColDefs.map(ec => (
-                          <div key={ec.key} style={{ fontSize:12, color:T.pageSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:8 }}>
+                          <div key={ec.key} style={{ fontSize:12, color:T.pageSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:8, textDecoration: isCancelled ? "line-through" : "none" }}>
                             {c.extraData?.[ec.extraKey]||<span style={{ color:T.pageTer }}>—</span>}
                           </div>
                         ))}
@@ -12356,11 +13856,109 @@ function WorkspaceSelector({ allWorkspaces, selectedIds, onChange }) {
 }
 
 // --- COMPOSANT PRINCIPAL PROFILE VIEW ---
-function ProfileView({ currentUser, onSave, showToast }) {
+function ProfileView({ currentUser, onSave, showToast, wsId }) {
   const [displayName, setDisplayName] = useState(currentUser?.displayName || currentUser?.username || "");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
-  
+
+  const [showCabinetModal, setShowCabinetModal] = useState(false);
+  const [syncingCalendar, setSyncingCalendar] = useState(false);
+  const [loadingM2S, setLoadingM2S] = useState(true);
+  const [allM2STasks, setAllM2STasks] = useState([]);
+
+  // Agrégation de TOUTES les formations M2S de TOUS les workspaces
+  useEffect(() => {
+    let active = true;
+    const fetchAllM2S = async () => {
+      setLoadingM2S(true);
+      try {
+        const wsRes = await apiFetch("/workspaces");
+        const list = extractArray(wsRes, "workspaces");
+        let aggregated = [];
+
+        for (const ws of list) {
+          const id = ws._id || ws.id;
+          const [tRes, cRes] = await Promise.all([
+            apiFetch(`/workspaces/${id}/tasks`),
+            apiFetch(`/workspaces/${id}/candidats?limit=1000`)
+          ]);
+
+          const wsTasks = extractArray(tRes, "tasks");
+          const wsCands = extractArray(cRes, "candidats");
+
+          const filtered = wsTasks.map(t => {
+            let grp = t.groupe || "";
+            if (!grp && t.name?.includes(" — Grp ")) grp = t.name.split(" — Grp ")[1];
+            if (!grp) grp = "1";
+            return { ...t, client: ws.name || ws.company, groupe: grp };
+          }).filter(t => {
+            const cand = wsCands.find(c => (c.theme || "").trim() === (t.group || "").trim() && String(c.groupe || "1") === String(t.groupe));
+            const cab = (cand?.cabinet || "").trim();
+            return cab === "M2S" || cab === "M2S Consulting" || cab === "M2S CONSULTING";
+          });
+
+          aggregated = [...aggregated, ...filtered];
+        }
+        if (active) setAllM2STasks(aggregated);
+      } catch (err) {
+        console.error("Aggregation error:", err);
+        showToast("Erreur lors de l'agrégation des formations M2S", "error");
+      } finally {
+        if (active) setLoadingM2S(false);
+      }
+    };
+    fetchAllM2S();
+    return () => { active = false; };
+  }, []);
+
+  const googleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setSyncingCalendar(true);
+      try {
+        const accessToken = tokenResponse.access_token;
+        if (allM2STasks.length === 0) {
+          showToast("Aucune formation M2S à synchroniser", "error");
+          setSyncingCalendar(false);
+          return;
+        }
+
+        let successCount = 0;
+        for (const t of allM2STasks) {
+          const grp = t.groupe;
+          // Ajout du client dans le titre
+          const title = `[${t.client}] ${t.group} — Grp ${grp}`;
+          const endDate = new Date(t.end);
+          endDate.setDate(endDate.getDate() + 1);
+
+          const event = {
+            summary: title,
+            start: { date: t.start },
+            end: { date: d2s(endDate) },
+            description: `Synchronisé via PlanAdmin (M2S).\nClient: ${t.client}`
+          };
+
+          const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+            method: "POST",
+            headers: {
+              'Authorization': 'Bearer ' + accessToken,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(event)
+          });
+          if (res.ok) successCount++;
+        }
+        showToast(`${successCount} événement(s) M2S synchronisé(s)`, "success");
+      } catch (err) {
+        console.error(err);
+        showToast("Erreur lors de la synchronisation", "error");
+      } finally {
+        setSyncingCalendar(false);
+      }
+    },
+    scope: "https://www.googleapis.com/auth/calendar.events",
+    onError: () => showToast("Échec Google", "error")
+  });
+
   const [team, setTeam] = useState([]);
   const [allWorkspaces, setAllWorkspaces] = useState([]);
   const [loadingTeam, setLoadingTeam] = useState(false);
@@ -12486,6 +14084,61 @@ function ProfileView({ currentUser, onSave, showToast }) {
           {saving ? "Sauvegarde..." : "Enregistrer"}
         </button>
       </div>
+
+      {/* INTÉGRATIONS ET NOTIFICATIONS */}
+      <div style={cardStyle}>
+        <div style={cardTitleStyle}>Intégrations & Notifications</div>
+        <div style={{ fontSize: 13, color: "#6b6b6b", marginBottom: 16 }}>
+          Synchronisez les formations <strong>M2S</strong> avec Google Calendar ou envoyez une notification par email.
+        </div>
+        
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            onClick={() => setShowCabinetModal(true)}
+            disabled={loadingM2S || allM2STasks.length === 0}
+            style={{ ...btnBase, padding: "8px 16px", borderRadius: 6, border: "1px solid #e3e3e2", background: "#fff", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, opacity: (loadingM2S || allM2STasks.length === 0) ? 0.5 : 1 }}
+          >
+            <Mail size={16} color="#2563eb" /> Notifier Cabinet (M2S)
+          </button>
+
+          <button
+            onClick={() => googleLogin()}
+            disabled={loadingM2S || syncingCalendar || allM2STasks.length === 0}
+            style={{ ...btnBase, padding: "8px 16px", borderRadius: 6, border: "1px solid #e3e3e2", background: "#fff", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, opacity: (loadingM2S || syncingCalendar || allM2STasks.length === 0) ? 0.5 : 1 }}
+          >
+            {syncingCalendar ? <Spinner size={14} color="#16a34a" /> : <CalendarDays size={16} color="#16a34a" />}
+            Google Calendar Sync
+          </button>
+        </div>
+
+        {loadingM2S && (
+          <div style={{ marginTop: 12, fontSize: 11, color: T.pageTer, display: "flex", alignItems: "center", gap: 6 }}>
+            <Spinner size={12} color={T.accent} /> Recherche des formations M2S dans tous vos espaces...
+          </div>
+        )}
+
+        {!loadingM2S && allM2STasks.length === 0 && (
+          <div style={{ marginTop: 12, fontSize: 11, color: "#d44c47" }}>
+             Aucune formation "M2S" ou "M2S Consulting" trouvée dans l'ensemble de vos espaces.
+          </div>
+        )}
+
+        {!loadingM2S && allM2STasks.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 11, color: "#16a34a" }}>
+             {allM2STasks.length} formation(s) M2S trouvée(s) à travers tous vos espaces.
+          </div>
+        )}
+      </div>
+
+      {/* ── Modal Notification Cabinet ── */}
+      {showCabinetModal && (
+        <CabinetNotificationModal
+          tasks={allM2STasks}
+          wsId={wsId}
+          showToast={showToast}
+          onClose={() => setShowCabinetModal(false)}
+        />
+      )}
 
       {/* GESTION ÉQUIPE */}
       {currentUser && !currentUser.parentId && currentUser.role !== "admin" && (
@@ -12973,6 +14626,9 @@ const updateWs = (updatedRaw) => {
               currentUser={currentUser}
               onSave={updateProfile}
               showToast={showToast}
+              tasks={tasks}
+              candidats={cands}
+              wsId={activeWs}
             />
           </div>
         </div>
